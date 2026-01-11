@@ -100,7 +100,14 @@ function renderAuditTable(type) {
 
   // Render table rows
   tbody.innerHTML = pageData.map(audit => {
-    const status = audit.flagged ? 'requirement-not-met' : 'requirement-met';
+    // Determine status display
+    let status = 'requirement-met';
+    if (audit.status === 'pending') {
+      status = 'pending';
+    } else if (audit.flagged) {
+      status = 'requirement-not-met';
+    }
+    
     const hoursLogged = audit.hoursLogged || 0;
     const cid = audit.cid || 'N/A';
     const name = audit.name || 'Unknown';
@@ -246,9 +253,19 @@ function setupSearch(type) {
           row.style.display = '';
         } else {
           const statusCell = row.cells[2];
-          const rowStatus = statusCell?.textContent.toLowerCase().trim();
+          const badgeText = statusCell?.textContent.toLowerCase().trim();
 
-          row.style.display = rowStatus === filter ? '' : 'none';
+          // Map filter values to badge text
+          let shouldShow = false;
+          if (filter === 'pending' && badgeText === 'pending audit') {
+            shouldShow = true;
+          } else if (filter === 'requirement-not-met' && badgeText === 'requirement not met') {
+            shouldShow = true;
+          } else if (filter === 'requirement-met' && badgeText === 'requirement met') {
+            shouldShow = true;
+          }
+
+          row.style.display = shouldShow ? '' : 'none';
         }
       });
     });
