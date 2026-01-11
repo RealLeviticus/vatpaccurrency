@@ -27,6 +27,52 @@ let currentPage = {
   local: 1
 };
 
+// Normalize audit records to the simplified schema the UI expects
+function normalizeAuditRecord(audit, type = 'visiting') {
+  if (!audit) return {
+    id: 'audit_unknown',
+    type,
+    status: 'pending',
+    hoursLogged: 0,
+    lastSession: null,
+    flagged: false
+  };
+
+  const rawCid = audit?.id?.replace?.('audit_', '')
+    || audit?.cid
+    || audit?.controller?.cid
+    || audit?.user?.cid
+    || audit?.controllerId
+    || audit?.controller?.id
+    || audit?.memberId
+    || null;
+
+  const id = rawCid ? `audit_${rawCid}` : (audit.id || `audit_unknown_${Math.random().toString(36).slice(2)}`);
+
+  const hoursLogged = Number(audit.hoursLogged ?? audit.hours ?? audit.totalHours ?? audit.time ?? 0) || 0;
+  const lastSession = audit.lastSession || audit.lastControlled || audit.last_seen || audit.lastSeen || null;
+
+  let status = 'pending';
+  if (audit.status === 'pending') status = 'pending';
+  else if (audit.status === 'flagged' || audit.flagged === true) status = 'flagged';
+  else if (audit.status === 'completed') status = 'completed';
+  else {
+    // Derive if not provided
+    if (audit.flagged === true) status = 'flagged';
+    else if (hoursLogged > 0 && lastSession) status = 'completed';
+    else status = 'flagged';
+  }
+
+  return {
+    id,
+    type: audit.type || type,
+    status,
+    hoursLogged,
+    lastSession,
+    flagged: status === 'flagged'
+  };
+}
+
 /**
  * Load audit data from API (directly from KV)
  */
@@ -40,8 +86,8 @@ async function loadAudits() {
     console.log('KV Data received:', kvData);
 
     if (kvData) {
-      visitingData = kvData.visiting || [];
-      localData = kvData.local || [];
+      visitingData = (kvData.visiting || []).map(a => normalizeAuditRecord(a, 'visiting'));
+      localData = (kvData.local || []).map(a => normalizeAuditRecord(a, 'local'));
       console.log(`Loaded ${visitingData.length} visiting and ${localData.length} local records`);
     } else {
       // Fallback to old endpoint structure
@@ -49,8 +95,10 @@ async function loadAudits() {
         api.getVisitingAudit().catch(() => ({active: [], completed: [], stats: {}})),
         api.getLocalAudit().catch(() => ({active: [], completed: [], stats: {}}))
       ]);
-      visitingData = [...(visiting.active || []), ...(visiting.completed || [])];
-      localData = [...(local.active || []), ...(local.completed || [])];
+      visitingData = [...(visiting.active || []), ...(visiting.completed || [])]
+        .map(a => normalizeAuditRecord(a, 'visiting'));
+      localData = [...(local.active || []), ...(local.completed || [])]
+        .map(a => normalizeAuditRecord(a, 'local'));
     }
 
     renderAuditTable(currentTab);
