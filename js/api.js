@@ -94,19 +94,6 @@ class WatchlistAPI {
    * @returns {Promise<{active: Array, completed: Array, stats: object}>}
    */
   async getVisitingAudit() {
-    if (R2_JSON_URL) {
-      const store = await fetchR2Store().catch(() => ({ visiting: [], local: [], lastRun: null }));
-      const completed = Array.isArray(store.visiting) ? store.visiting : [];
-      return {
-        active: [],
-        completed,
-        stats: {
-          totalActive: 0,
-          totalCompleted: completed.length,
-          averageHours: 0
-        }
-      };
-    }
     return this.request('/audit/visiting');
   }
 
@@ -115,19 +102,6 @@ class WatchlistAPI {
    * @returns {Promise<{active: Array, completed: Array, stats: object}>}
    */
   async getLocalAudit() {
-    if (R2_JSON_URL) {
-      const store = await fetchR2Store().catch(() => ({ visiting: [], local: [], lastRun: null }));
-      const completed = Array.isArray(store.local) ? store.local : [];
-      return {
-        active: [],
-        completed,
-        stats: {
-          totalActive: 0,
-          totalCompleted: completed.length,
-          averageHours: 0
-        }
-      };
-    }
     return this.request('/audit/local');
   }
 
@@ -161,17 +135,6 @@ class WatchlistAPI {
    * @returns {Promise<object>}
    */
   async getStats() {
-    if (R2_JSON_URL) {
-      const store = await fetchR2Store().catch(() => ({ visiting: [], local: [], lastRun: null }));
-      const v = Array.isArray(store.visiting) ? store.visiting : [];
-      const l = Array.isArray(store.local) ? store.local : [];
-      return {
-        totalWatched: 0,
-        activeAudits: 0,
-        completedAudits: v.length + l.length,
-        lastUpdate: store.lastRun || new Date().toISOString()
-      };
-    }
     return this.request('/stats');
   }
 }
