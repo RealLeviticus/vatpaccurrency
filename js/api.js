@@ -4,6 +4,9 @@
  */
 
 const API_BASE = 'https://vatsimactivitybot.therealleviticus.workers.dev/api';
+const KV_API_BASE = typeof window !== 'undefined'
+  ? (window.KV_API_BASE || 'https://kv-reader.therealleviticus.workers.dev/api')
+  : 'https://kv-reader.therealleviticus.workers.dev/api';
 // Optional: Public R2 JSON URL (set in index.html as window.R2_JSON_URL)
 const R2_JSON_URL = typeof window !== 'undefined' ? (window.R2_JSON_URL || null) : null;
 
@@ -94,7 +97,20 @@ class WatchlistAPI {
    * @returns {Promise<{visiting: Array, local: Array, lastRun: string, batchProgress: object}>}
    */
   async getKVData() {
-    return this.request('/kv');
+    const url = `${KV_API_BASE}/kv`;
+    try {
+      const response = await fetch(url, {
+        headers: { 'Content-Type': 'application/json' }
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      return await response.json();
+    } catch (err) {
+      // fallback to main API if KV reader unavailable
+      console.warn('KV reader failed, falling back to main API:', err?.message || err);
+      return this.request('/kv');
+    }
   }
 
   /**
