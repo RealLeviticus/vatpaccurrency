@@ -71,7 +71,7 @@ function renderAuditTable(type) {
   if (!data || data.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="5" style="text-align: center;">
+        <td colspan="4" style="text-align: center;">
           <div class="empty-state">
             <div class="empty-state-icon">📊</div>
             <p>No ${type} audit data available</p>
@@ -108,15 +108,14 @@ function renderAuditTable(type) {
       status = 'requirement-not-met';
     }
     
+    // Extract CID from id field (format: "audit_XXXXXX")
+    const cid = audit.id ? audit.id.replace('audit_', '') : 'N/A';
     const hoursLogged = audit.hoursLogged || 0;
-    const cid = audit.cid || 'N/A';
-    const name = audit.name || 'Unknown';
     const lastControlled = audit.lastSession ? formatDate(audit.lastSession) : 'Never';
 
     return `
       <tr class="audit-row-${status}">
         <td>${cid}</td>
-        <td>${name}</td>
         <td>${createStatusBadge(status)}</td>
         <td>${formatDuration(hoursLogged)}</td>
         <td>${lastControlled}</td>
