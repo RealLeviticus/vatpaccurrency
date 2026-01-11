@@ -54,12 +54,11 @@ async function loadAudits() {
 function renderAuditTable(type) {
   const data = type === 'visiting' ? visitingData : localData;
   const tbody = document.getElementById(`${type}TableBody`);
-  const targetHours = type === 'visiting' ? 10 : 15;
 
   if (!data || data.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="8" style="text-align: center;">
+        <td colspan="4" style="text-align: center;">
           <div class="empty-state">
             <div class="empty-state-icon">📊</div>
             <p>No ${type} audit data available</p>
@@ -71,15 +70,10 @@ function renderAuditTable(type) {
   }
 
   tbody.innerHTML = data.map(audit => {
-    const status = audit.status || 'pending';
+    const status = audit.flagged ? 'flagged' : 'completed';
     const hoursLogged = audit.hoursLogged || 0;
     const cid = audit.cid || 'N/A';
     const name = audit.name || 'Unknown';
-    const ticksRemaining = (status === 'active' && audit.ticksRemaining != null)
-      ? audit.ticksRemaining
-      : '-';
-    const startedAt = audit.startedAt || null;
-    const completedAt = audit.completedAt || null;
 
     return `
       <tr class="audit-row-${status}">
@@ -87,10 +81,6 @@ function renderAuditTable(type) {
         <td>${name}</td>
         <td>${createStatusBadge(status)}</td>
         <td>${formatDuration(hoursLogged)}</td>
-        <td>${ticksRemaining}</td>
-        <td>${formatDate(startedAt)}</td>
-        <td>${formatDate(completedAt)}</td>
-        <td>${createProgressBar(hoursLogged, targetHours)}</td>
       </tr>
     `;
   }).join('');
