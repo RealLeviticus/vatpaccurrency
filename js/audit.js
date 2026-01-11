@@ -83,12 +83,20 @@ function renderAuditTable(type) {
     return;
   }
 
+  // Reset search/filter when rendering
+  const searchInput = document.getElementById(`${type}Search`);
+  const filterSelect = document.getElementById(`${type}Filter`);
+  if (searchInput) searchInput.value = '';
+  if (filterSelect) filterSelect.value = 'all';
+
   // Calculate pagination
   const totalPages = Math.ceil(data.length / ITEMS_PER_PAGE);
   const page = currentPage[type];
   const startIdx = (page - 1) * ITEMS_PER_PAGE;
   const endIdx = startIdx + ITEMS_PER_PAGE;
   const pageData = data.slice(startIdx, endIdx);
+
+  console.log(`Rendering ${type}: page ${page}/${totalPages}, showing ${pageData.length} of ${data.length} total items`);
 
   // Render table rows
   tbody.innerHTML = pageData.map(audit => {
