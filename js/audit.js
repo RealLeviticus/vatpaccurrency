@@ -241,8 +241,8 @@ function setupSearch(type) {
       const tbody = document.getElementById(`${type}TableBody`);
       const searchTerm = event.target.value;
 
-      // Search in CID (column 0) and Name (column 1)
-      filterTable(tbody, searchTerm, [0, 1]);
+      // Search in CID only (column 0) - Name field removed
+      filterTable(tbody, searchTerm, [0]);
     }, 300));
   }
 
@@ -261,7 +261,7 @@ function setupSearch(type) {
         if (filter === 'all') {
           row.style.display = '';
         } else {
-          const statusCell = row.cells[2];
+          const statusCell = row.cells[1];
           const badgeText = statusCell?.textContent.toLowerCase().trim();
 
           // Map filter values to badge text
