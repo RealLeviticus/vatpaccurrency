@@ -37,9 +37,12 @@ async function loadAudits() {
     // Fetch directly from KV endpoint for faster, always up-to-date data
     const kvData = await api.getKVData().catch(() => null);
 
+    console.log('KV Data received:', kvData);
+
     if (kvData) {
       visitingData = kvData.visiting || [];
       localData = kvData.local || [];
+      console.log(`Loaded ${visitingData.length} visiting and ${localData.length} local records`);
     } else {
       // Fallback to old endpoint structure
       const [visiting, local] = await Promise.all([
@@ -99,19 +102,26 @@ function renderAuditTable(type) {
   console.log(`Rendering ${type}: page ${page}/${totalPages}, showing ${pageData.length} of ${data.length} total items`);
 
   // Render table rows
+  console.log('Rendering table with data:', pageData);
   tbody.innerHTML = pageData.map(audit => {
-    // Determine status display
+    console.log('Processing audit record:', audit);
+    
+    // Determine status display based on actual status values
     let status = 'requirement-met';
     if (audit.status === 'pending') {
       status = 'pending';
-    } else if (audit.flagged) {
+    } else if (audit.status === 'flagged' || audit.flagged === true) {
       status = 'requirement-not-met';
+    } else if (audit.status === 'completed') {
+      status = 'requirement-met';
     }
     
     // Extract CID from id field (format: "audit_XXXXXX")
-    const cid = audit.id ? audit.id.replace('audit_', '') : 'N/A';
-    const hoursLogged = audit.hoursLogged || 0;
+    const cid = audit.id ? String(audit.id).replace('audit_', '') : 'N/A';
+    const hoursLogged = Number(audit.hoursLogged) || 0;
     const lastControlled = audit.lastSession ? formatDate(audit.lastSession) : 'Never';
+
+    console.log(`Row: CID=${cid}, status=${status}, hours=${hoursLogged}, lastSession=${lastControlled}`);
 
     return `
       <tr class="audit-row-${status}">
