@@ -190,6 +190,7 @@ export function createStatusBadge(status, text = null) {
     offline: 'badge-secondary',
     active: 'badge-info',
     completed: 'badge-success',
+    flagged: 'badge-danger',
     failed: 'badge-danger',
     pending: 'badge-warning'
   };
