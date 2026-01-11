@@ -11,6 +11,7 @@ import {
   formatDuration,
   createProgressBar,
   createStatusBadge,
+  createRatingBadge,
   showError,
   showLoading,
   hideLoading,
@@ -95,6 +96,7 @@ function normalizeAuditRecord(audit, type = 'visiting') {
     id,
     type: audit.type || type,
     status,
+    rating: audit.rating || 'N/A',
     hoursLogged,
     lastSession,
     flagged: status === 'flagged'
@@ -180,7 +182,7 @@ function renderAuditTable(type) {
   if (!allData || allData.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="4" style="text-align: center;">
+        <td colspan="5" style="text-align: center;">
           <div class="empty-state">
             <div class="empty-state-icon">📊</div>
             <p>No ${type} audit data available</p>
@@ -198,7 +200,7 @@ function renderAuditTable(type) {
   if (data.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="4" style="text-align: center;">
+        <td colspan="5" style="text-align: center;">
           <div class="empty-state">
             <div class="empty-state-icon">🔍</div>
             <p>No results found for current search/filter</p>
@@ -243,14 +245,16 @@ function renderAuditTable(type) {
     // Extract CID from id field (format: "audit_XXXXXX") and sanitize
     const rawCid = audit.id ? String(audit.id).replace('audit_', '') : 'N/A';
     const cid = escapeHTML(rawCid);
+    const rating = escapeHTML(audit.rating || 'N/A');
     const hoursLogged = Number(audit.hoursLogged) || 0;
     const lastControlled = audit.lastSession ? escapeHTML(formatDate(audit.lastSession)) : 'Never';
 
-    console.log(`Row: CID=${cid}, status=${status}, hours=${hoursLogged}, lastSession=${lastControlled}`);
+    console.log(`Row: CID=${cid}, rating=${rating}, status=${status}, hours=${hoursLogged}, lastSession=${lastControlled}`);
 
     return `
       <tr class="audit-row-${status}">
         <td>${cid}</td>
+        <td>${createRatingBadge(rating)}</td>
         <td>${createStatusBadge(status)}</td>
         <td>${escapeHTML(formatDuration(hoursLogged))}</td>
         <td>${lastControlled}</td>

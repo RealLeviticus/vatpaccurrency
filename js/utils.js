@@ -184,6 +184,34 @@ export function createProgressBar(current, total) {
  * @param {string} text - Optional custom text
  * @returns {string} HTML string
  */
+/**
+ * Create a rating badge with color coding
+ * Yellow for S1, S2 and S3
+ * Green for C1, C3
+ * Light Blue for SUP, I1, I3
+ * Light purple for ADM
+ * @param {string} rating - Rating short code (S1, S2, C1, etc.)
+ * @returns {string} HTML badge string
+ */
+export function createRatingBadge(rating) {
+  const ratingUpper = String(rating).toUpperCase();
+
+  // Define rating badge classes based on requirements
+  let badgeClass = 'badge-secondary'; // Default gray
+
+  if (['S1', 'S2', 'S3'].includes(ratingUpper)) {
+    badgeClass = 'badge-rating-student'; // Yellow
+  } else if (['C1', 'C3'].includes(ratingUpper)) {
+    badgeClass = 'badge-rating-controller'; // Green
+  } else if (['I1', 'I3', 'SUP'].includes(ratingUpper)) {
+    badgeClass = 'badge-rating-instructor'; // Light blue
+  } else if (ratingUpper === 'ADM') {
+    badgeClass = 'badge-rating-admin'; // Light purple
+  }
+
+  return `<span class="badge ${badgeClass}">${escapeHTML(rating)}</span>`;
+}
+
 export function createStatusBadge(status, text = null) {
   const badges = {
     online: 'badge-success',
