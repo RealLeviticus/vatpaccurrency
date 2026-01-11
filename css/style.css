@@ -297,6 +297,31 @@ body {
   border: 1px solid var(--border-color);
 }
 
+/* Audit row styling based on status */
+.audit-row-pending {
+  background-color: rgba(234, 179, 8, 0.05);
+}
+
+.audit-row-pending:hover {
+  background-color: rgba(234, 179, 8, 0.1);
+}
+
+.audit-row-requirement-met {
+  background-color: rgba(34, 197, 94, 0.05);
+}
+
+.audit-row-requirement-met:hover {
+  background-color: rgba(34, 197, 94, 0.1);
+}
+
+.audit-row-requirement-not-met {
+  background-color: rgba(239, 68, 68, 0.05);
+}
+
+.audit-row-requirement-not-met:hover {
+  background-color: rgba(239, 68, 68, 0.1);
+}
+
 /* Buttons - Minimal grey design */
 .btn-primary,
 .btn-secondary,

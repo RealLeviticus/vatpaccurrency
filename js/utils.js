@@ -199,7 +199,8 @@ export function createStatusBadge(status, text = null) {
 
   const statusText = {
     'requirement-met': 'Requirement Met',
-    'requirement-not-met': 'Requirement Not Met'
+    'requirement-not-met': 'Requirement Not Met',
+    pending: 'Pending Audit'
   };
 
   const badgeClass = badges[status] || 'badge-secondary';
