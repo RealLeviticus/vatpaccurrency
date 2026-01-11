@@ -220,6 +220,7 @@ export function createStatusBadge(status, text = null) {
     completed: 'badge-success',
     'requirement-met': 'badge-success',
     'requirement-not-met': 'badge-danger',
+    'not-division-member': 'badge-purple',
     flagged: 'badge-danger',
     failed: 'badge-danger',
     pending: 'badge-warning'
@@ -228,6 +229,7 @@ export function createStatusBadge(status, text = null) {
   const statusText = {
     'requirement-met': 'Requirement Met',
     'requirement-not-met': 'Requirement Not Met',
+    'not-division-member': 'Not Division Member',
     pending: 'Pending Audit'
   };
 
