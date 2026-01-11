@@ -12,9 +12,9 @@ GITHUB_BRANCH = "main"
 # GITHUB_TOKEN - GitHub Personal Access Token
 # GITHUB_REPO - Format: username/repository
 
-# Cron trigger - runs every 5 minutes
+# Cron trigger - runs daily at midnight UTC
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["0 0 * * *"]
 
 # Routes (optional - if you want custom domain)
 # [[routes]]
