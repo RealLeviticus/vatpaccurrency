@@ -70,7 +70,7 @@ function renderAuditTable(type) {
   }
 
   tbody.innerHTML = data.map(audit => {
-    const status = audit.flagged ? 'flagged' : 'completed';
+    const status = audit.flagged ? 'requirement-not-met' : 'requirement-met';
     const hoursLogged = audit.hoursLogged || 0;
     const cid = audit.cid || 'N/A';
     const name = audit.name || 'Unknown';

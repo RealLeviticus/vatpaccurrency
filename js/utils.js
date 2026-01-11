@@ -190,13 +190,20 @@ export function createStatusBadge(status, text = null) {
     offline: 'badge-secondary',
     active: 'badge-info',
     completed: 'badge-success',
+    'requirement-met': 'badge-success',
+    'requirement-not-met': 'badge-danger',
     flagged: 'badge-danger',
     failed: 'badge-danger',
     pending: 'badge-warning'
   };
 
+  const statusText = {
+    'requirement-met': 'Requirement Met',
+    'requirement-not-met': 'Requirement Not Met'
+  };
+
   const badgeClass = badges[status] || 'badge-secondary';
-  const badgeText = text || status.charAt(0).toUpperCase() + status.slice(1);
+  const badgeText = text || statusText[status] || status.charAt(0).toUpperCase() + status.slice(1);
 
   return `<span class="badge ${badgeClass}">${badgeText}</span>`;
 }
