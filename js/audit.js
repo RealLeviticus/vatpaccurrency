@@ -28,6 +28,12 @@ let currentPage = {
   local: 1
 };
 
+// Active search and filter state
+let activeFilters = {
+  visiting: { search: '', status: 'all' },
+  local: { search: '', status: 'all' }
+};
+
 // Normalize audit records to the simplified schema the UI expects
 function normalizeAuditRecord(audit, type = 'visiting') {
   if (!audit) {
@@ -133,15 +139,45 @@ async function loadAudits() {
 }
 
 /**
+ * Get filtered data based on active search and filter
+ * @param {'visiting'|'local'} type - Audit type
+ * @returns {Array} Filtered data array
+ */
+function getFilteredData(type) {
+  const data = type === 'visiting' ? visitingData : localData;
+  const filters = activeFilters[type];
+
+  if (!data || data.length === 0) return [];
+
+  return data.filter(audit => {
+    // Apply status filter
+    if (filters.status !== 'all') {
+      if (filters.status === 'pending' && audit.status !== 'pending') return false;
+      if (filters.status === 'requirement-not-met' && audit.status !== 'flagged') return false;
+      if (filters.status === 'requirement-met' && audit.status !== 'completed') return false;
+    }
+
+    // Apply search filter (search CID)
+    if (filters.search && filters.search.trim() !== '') {
+      const cid = audit.id ? String(audit.id).replace('audit_', '') : '';
+      const searchTerm = filters.search.toLowerCase();
+      if (!cid.toLowerCase().includes(searchTerm)) return false;
+    }
+
+    return true;
+  });
+}
+
+/**
  * Render audit table for specified type
  * @param {'visiting'|'local'} type - Audit type
  */
 function renderAuditTable(type) {
-  const data = type === 'visiting' ? visitingData : localData;
+  const allData = type === 'visiting' ? visitingData : localData;
   const tbody = document.getElementById(`${type}TableBody`);
   const pagination = document.getElementById(`${type}Pagination`);
 
-  if (!data || data.length === 0) {
+  if (!allData || allData.length === 0) {
     tbody.innerHTML = `
       <tr>
         <td colspan="4" style="text-align: center;">
@@ -156,11 +192,24 @@ function renderAuditTable(type) {
     return;
   }
 
-  // Reset search/filter when rendering
-  const searchInput = document.getElementById(`${type}Search`);
-  const filterSelect = document.getElementById(`${type}Filter`);
-  if (searchInput) searchInput.value = '';
-  if (filterSelect) filterSelect.value = 'all';
+  // Get filtered data based on active search/filter
+  const data = getFilteredData(type);
+
+  if (data.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="4" style="text-align: center;">
+          <div class="empty-state">
+            <div class="empty-state-icon">🔍</div>
+            <p>No results found for current search/filter</p>
+            <small>Try adjusting your search or filter criteria</small>
+          </div>
+        </td>
+      </tr>
+    `;
+    if (pagination) pagination.style.display = 'none';
+    return;
+  }
 
   // Calculate pagination
   const totalPages = Math.ceil(data.length / ITEMS_PER_PAGE);
@@ -314,45 +363,31 @@ function setupSearch(type) {
 
   if (searchInput) {
     searchInput.addEventListener('input', debounce((event) => {
-      const tbody = document.getElementById(`${type}TableBody`);
       const searchTerm = event.target.value;
 
-      // Search in CID only (column 0) - Name field removed
-      filterTable(tbody, searchTerm, [0]);
+      // Update active filter state
+      activeFilters[type].search = searchTerm;
+
+      // Reset to page 1 when searching
+      currentPage[type] = 1;
+
+      // Re-render table with filtered data
+      renderAuditTable(type);
     }, 300));
   }
 
   if (filterSelect) {
     filterSelect.addEventListener('change', (event) => {
       const filter = event.target.value;
-      const rows = document.querySelectorAll(`#${type}TableBody tr`);
 
-      rows.forEach(row => {
-        // Skip empty state row
-        if (row.cells.length === 1) {
-          row.style.display = '';
-          return;
-        }
+      // Update active filter state
+      activeFilters[type].status = filter;
 
-        if (filter === 'all') {
-          row.style.display = '';
-        } else {
-          const statusCell = row.cells[1];
-          const badgeText = statusCell?.textContent.toLowerCase().trim();
+      // Reset to page 1 when filtering
+      currentPage[type] = 1;
 
-          // Map filter values to badge text
-          let shouldShow = false;
-          if (filter === 'pending' && badgeText === 'pending audit') {
-            shouldShow = true;
-          } else if (filter === 'requirement-not-met' && badgeText === 'requirement not met') {
-            shouldShow = true;
-          } else if (filter === 'requirement-met' && badgeText === 'requirement met') {
-            shouldShow = true;
-          }
-
-          row.style.display = shouldShow ? '' : 'none';
-        }
-      });
+      // Re-render table with filtered data
+      renderAuditTable(type);
     });
   }
 }
