@@ -3,57 +3,129 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="VATPAC Controller Watchlist - Monitor VATSIM controller activity">
-  <title>VATPAC Watchlist - Dashboard</title>
+  <meta name="description" content="VATPAC Controller Audits - Monitor VATSIM controller activity requirements">
+  <title>VATPAC Controller Audits</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
   <!-- Navigation -->
   <nav class="navbar">
-    <a href="index.html" class="nav-brand">VATPAC Watchlist</a>
+    <a href="index.html" class="nav-brand">VATPAC Audits</a>
     <ul class="nav-menu">
-      <li><a href="index.html" class="active">Dashboard</a></li>
-      <li><a href="audit.html">Audits</a></li>
-      <li><a href="watchlist.html">Watchlist</a></li>
+      <li><a href="index.html" class="active">Audits</a></li>
     </ul>
   </nav>
 
   <!-- Main Content -->
   <main class="container">
-    <!-- Stats Grid -->
-    <section class="stats-grid">
-      <div class="stat-card">
-        <h3>Watched Controllers</h3>
-        <p class="stat-value" id="totalWatched">-</p>
+    <div class="page-header">
+      <h1>Controller Audits</h1>
+      <div class="tab-switcher">
+        <button class="tab-btn active" data-tab="visiting">Visiting</button>
+        <button class="tab-btn" data-tab="local">Local</button>
       </div>
-      <div class="stat-card">
-        <h3>Active Audits</h3>
-        <p class="stat-value" id="activeAudits">-</p>
+    </div>
+
+    <!-- Visiting Audit Tab -->
+    <section id="visitingTab" class="audit-tab active">
+      <h2 style="color: var(--text-primary); margin-bottom: 1rem; font-size: 1.5rem;">Visiting Controller Audits</h2>
+      <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">
+        Visiting controllers must log at least <strong>10 hours</strong> of AU/PAC controlling activity over 3 months.
+      </p>
+
+      <div class="table-controls">
+        <input
+          type="search"
+          id="visitingSearch"
+          placeholder="Search by CID or name..."
+          aria-label="Search visiting audits"
+        >
+        <select id="visitingFilter" aria-label="Filter by status">
+          <option value="all">All Statuses</option>
+          <option value="active">Active Only</option>
+          <option value="completed">Completed Only</option>
+        </select>
       </div>
-      <div class="stat-card">
-        <h3>Online Now</h3>
-        <p class="stat-value" id="onlineNow">-</p>
-      </div>
-      <div class="stat-card">
-        <h3>Completed Audits</h3>
-        <p class="stat-value" id="completedAudits">-</p>
+
+      <div class="table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th data-sort="cid">CID</th>
+              <th data-sort="name">Name</th>
+              <th data-sort="status">Status</th>
+              <th data-sort="hours">Hours</th>
+              <th data-sort="ticks">Ticks Remaining</th>
+              <th data-sort="started">Started</th>
+              <th data-sort="completed">Completed</th>
+              <th>Progress</th>
+            </tr>
+          </thead>
+          <tbody id="visitingTableBody">
+            <tr>
+              <td colspan="8" style="text-align: center;">
+                <div class="empty-state">
+                  <div class="empty-state-icon">⏳</div>
+                  <p>Loading audit data...</p>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </section>
 
-    <!-- Currently Online Controllers -->
-    <section class="presence-section">
-      <h2>Currently Online Controllers</h2>
-      <div id="presenceList" class="presence-list">
-        <!-- Dynamically populated by dashboard.js -->
-        <div class="empty-state">
-          <div class="empty-state-icon">⏳</div>
-          <p>Loading...</p>
-        </div>
+    <!-- Local Audit Tab -->
+    <section id="localTab" class="audit-tab">
+      <h2 style="color: var(--text-primary); margin-bottom: 1rem; font-size: 1.5rem;">Local Controller Audits</h2>
+      <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">
+        Local controllers must log at least <strong>15 hours</strong> of AU/PAC controlling activity over 3 months.
+      </p>
+
+      <div class="table-controls">
+        <input
+          type="search"
+          id="localSearch"
+          placeholder="Search by CID or name..."
+          aria-label="Search local audits"
+        >
+        <select id="localFilter" aria-label="Filter by status">
+          <option value="all">All Statuses</option>
+          <option value="active">Active Only</option>
+          <option value="completed">Completed Only</option>
+        </select>
+      </div>
+
+      <div class="table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th data-sort="cid">CID</th>
+              <th data-sort="name">Name</th>
+              <th data-sort="status">Status</th>
+              <th data-sort="hours">Hours</th>
+              <th data-sort="ticks">Ticks Remaining</th>
+              <th data-sort="started">Started</th>
+              <th data-sort="completed">Completed</th>
+              <th>Progress</th>
+            </tr>
+          </thead>
+          <tbody id="localTableBody">
+            <tr>
+              <td colspan="8" style="text-align: center;">
+                <div class="empty-state">
+                  <div class="empty-state-icon">⏳</div>
+                  <p>Loading audit data...</p>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </section>
   </main>
 
   <!-- JavaScript Modules -->
-  <script type="module" src="js/dashboard.js"></script>
+  <script type="module" src="js/audit.js"></script>
 </body>
 </html>

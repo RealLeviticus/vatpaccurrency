@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>API Test Page</title>
+  <style>
+    body {
+      font-family: monospace;
+      background: #0a0e27;
+      color: #e0e6f0;
+      padding: 2rem;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    h1 { color: #06b6d4; }
+    button {
+      background: #3b82f6;
+      color: white;
+      border: none;
+      padding: 0.75rem 1.5rem;
+      margin: 0.5rem;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 1rem;
+    }
+    button:hover { background: #2563eb; }
+    pre {
+      background: #141936;
+      padding: 1rem;
+      border-radius: 4px;
+      overflow-x: auto;
+      border: 1px solid #2d3548;
+    }
+    .endpoint {
+      margin: 2rem 0;
+      padding: 1rem;
+      background: #1e2440;
+      border-radius: 4px;
+      border-left: 4px solid #06b6d4;
+    }
+    .status {
+      padding: 0.5rem 1rem;
+      margin: 1rem 0;
+      border-radius: 4px;
+    }
+    .success { background: rgba(16, 185, 129, 0.2); border: 1px solid #10b981; }
+    .error { background: rgba(239, 68, 68, 0.2); border: 1px solid #ef4444; }
+    input {
+      background: #141936;
+      color: #e0e6f0;
+      border: 1px solid #2d3548;
+      padding: 0.5rem;
+      border-radius: 4px;
+      margin: 0.5rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>VATPAC Watchlist API Test</h1>
+  <p>This page lets you test all API endpoints without deploying to GitHub Pages.</p>
+
+  <div class="endpoint">
+    <h2>GET /api/stats</h2>
+    <button onclick="testStats()">Test Stats</button>
+    <pre id="statsResult">Click button to test...</pre>
+  </div>
+
+  <div class="endpoint">
+    <h2>GET /api/watchlist</h2>
+    <button onclick="testGetWatchlist()">Test Get Watchlist</button>
+    <pre id="watchlistResult">Click button to test...</pre>
+  </div>
+
+  <div class="endpoint">
+    <h2>POST /api/watchlist</h2>
+    <input type="text" id="addCid" placeholder="Enter CID (e.g., 123456)">
+    <button onclick="testAddWatchlist()">Test Add to Watchlist</button>
+    <pre id="addResult">Enter CID and click button...</pre>
+  </div>
+
+  <div class="endpoint">
+    <h2>DELETE /api/watchlist/:cid</h2>
+    <input type="text" id="deleteCid" placeholder="Enter CID to remove">
+    <button onclick="testDeleteWatchlist()">Test Remove from Watchlist</button>
+    <pre id="deleteResult">Enter CID and click button...</pre>
+  </div>
+
+  <div class="endpoint">
+    <h2>GET /api/presence</h2>
+    <button onclick="testPresence()">Test Presence</button>
+    <pre id="presenceResult">Click button to test...</pre>
+  </div>
+
+  <div class="endpoint">
+    <h2>GET /api/audit/visiting</h2>
+    <button onclick="testVisitingAudit()">Test Visiting Audit</button>
+    <pre id="visitingResult">Click button to test...</pre>
+  </div>
+
+  <div class="endpoint">
+    <h2>GET /api/audit/local</h2>
+    <button onclick="testLocalAudit()">Test Local Audit</button>
+    <pre id="localResult">Click button to test...</pre>
+  </div>
+
+  <script>
+    const API_BASE = 'https://vatsimactivitybot.therealleviticus.workers.dev/api';
+
+    async function testEndpoint(method, path, body = null, resultId) {
+      const resultEl = document.getElementById(resultId);
+      resultEl.textContent = 'Loading...';
+
+      try {
+        const options = {
+          method,
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        };
+
+        if (body) {
+          options.body = JSON.stringify(body);
+        }
+
+        const response = await fetch(`${API_BASE}${path}`, options);
+        const data = await response.json();
+
+        const statusClass = response.ok ? 'success' : 'error';
+        resultEl.innerHTML = `
+          <div class="status ${statusClass}">
+            Status: ${response.status} ${response.statusText}
+          </div>
+          ${JSON.stringify(data, null, 2)}
+        `;
+      } catch (error) {
+        resultEl.innerHTML = `
+          <div class="status error">
+            Error: ${error.message}
+          </div>
+        `;
+      }
+    }
+
+    function testStats() {
+      testEndpoint('GET', '/stats', null, 'statsResult');
+    }
+
+    function testGetWatchlist() {
+      testEndpoint('GET', '/watchlist', null, 'watchlistResult');
+    }
+
+    function testAddWatchlist() {
+      const cid = document.getElementById('addCid').value.trim();
+      if (!cid) {
+        alert('Please enter a CID');
+        return;
+      }
+      testEndpoint('POST', '/watchlist', { cid }, 'addResult');
+    }
+
+    function testDeleteWatchlist() {
+      const cid = document.getElementById('deleteCid').value.trim();
+      if (!cid) {
+        alert('Please enter a CID');
+        return;
+      }
+      testEndpoint('DELETE', `/watchlist/${cid}`, null, 'deleteResult');
+    }
+
+    function testPresence() {
+      testEndpoint('GET', '/presence', null, 'presenceResult');
+    }
+
+    function testVisitingAudit() {
+      testEndpoint('GET', '/audit/visiting', null, 'visitingResult');
+    }
+
+    function testLocalAudit() {
+      testEndpoint('GET', '/audit/local', null, 'localResult');
+    }
+
+    // Auto-test stats on load
+    window.addEventListener('DOMContentLoaded', () => {
+      testStats();
+    });
+  </script>
+</body>
+</html>

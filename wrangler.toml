@@ -1,0 +1,22 @@
+name = "vatsimactivitybot"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+# Environment variables
+[vars]
+ALLOWED_ORIGIN = "https://realleviticus.github.io"
+GITHUB_DIR = "cf-cache"
+GITHUB_BRANCH = "main"
+
+# Secrets (set with: wrangler secret put GITHUB_TOKEN)
+# GITHUB_TOKEN - GitHub Personal Access Token
+# GITHUB_REPO - Format: username/repository
+
+# Cron trigger - runs every 5 minutes
+[triggers]
+crons = ["*/5 * * * *"]
+
+# Routes (optional - if you want custom domain)
+# [[routes]]
+# pattern = "api.vatpac.org/*"
+# zone_name = "vatpac.org"
