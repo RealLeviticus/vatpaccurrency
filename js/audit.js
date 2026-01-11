@@ -15,7 +15,8 @@ import {
   showLoading,
   hideLoading,
   makeTableSortable,
-  debounce
+  debounce,
+  escapeHTML
 } from './utils.js';
 
 let visitingData = [];
@@ -29,38 +30,59 @@ let currentPage = {
 
 // Normalize audit records to the simplified schema the UI expects
 function normalizeAuditRecord(audit, type = 'visiting') {
-  if (!audit) return {
-    id: 'audit_unknown',
-    type,
-    status: 'pending',
-    hoursLogged: 0,
-    lastSession: null,
-    flagged: false
-  };
+  if (!audit) {
+    console.warn('normalizeAuditRecord received null/undefined audit');
+    return {
+      id: 'audit_unknown',
+      type,
+      status: 'pending',
+      hoursLogged: 0,
+      lastSession: null,
+      flagged: false
+    };
+  }
 
-  const rawCid = audit?.id?.replace?.('audit_', '')
-    || audit?.cid
-    || audit?.controller?.cid
-    || audit?.user?.cid
-    || audit?.controllerId
-    || audit?.controller?.id
-    || audit?.memberId
-    || null;
+  // The audit.id should already be in format "audit_XXXXXX" from worker
+  // If it's missing the audit_ prefix, add it
+  let id = audit.id;
+  if (id && !id.startsWith('audit_')) {
+    id = `audit_${id}`;
+  } else if (!id) {
+    // Fallback: try to extract CID from other fields
+    const rawCid = audit.cid
+      || audit.controller?.cid
+      || audit.user?.cid
+      || audit.controllerId
+      || audit.memberId;
 
-  const id = rawCid ? `audit_${rawCid}` : (audit.id || `audit_unknown_${Math.random().toString(36).slice(2)}`);
+    if (rawCid) {
+      id = `audit_${rawCid}`;
+    } else {
+      console.warn('Could not extract CID from audit record:', audit);
+      id = `audit_unknown_${Math.random().toString(36).slice(2)}`;
+    }
+  }
 
   const hoursLogged = Number(audit.hoursLogged ?? audit.hours ?? audit.totalHours ?? audit.time ?? 0) || 0;
   const lastSession = audit.lastSession || audit.lastControlled || audit.last_seen || audit.lastSeen || null;
 
+  // Determine status from the audit record
   let status = 'pending';
-  if (audit.status === 'pending') status = 'pending';
-  else if (audit.status === 'flagged' || audit.flagged === true) status = 'flagged';
-  else if (audit.status === 'completed') status = 'completed';
-  else {
-    // Derive if not provided
-    if (audit.flagged === true) status = 'flagged';
-    else if (hoursLogged > 0 && lastSession) status = 'completed';
-    else status = 'flagged';
+  if (audit.status === 'pending') {
+    status = 'pending';
+  } else if (audit.status === 'flagged' || audit.flagged === true) {
+    status = 'flagged';
+  } else if (audit.status === 'completed') {
+    status = 'completed';
+  } else {
+    // Derive status if not explicitly provided
+    if (audit.flagged === true) {
+      status = 'flagged';
+    } else if (hoursLogged > 0 || lastSession) {
+      status = 'completed';
+    } else {
+      status = 'pending';
+    }
   }
 
   return {
@@ -153,7 +175,7 @@ function renderAuditTable(type) {
   console.log('Rendering table with data:', pageData);
   tbody.innerHTML = pageData.map(audit => {
     console.log('Processing audit record:', audit);
-    
+
     // Determine status display based on actual status values
     let status = 'requirement-met';
     if (audit.status === 'pending') {
@@ -162,12 +184,18 @@ function renderAuditTable(type) {
       status = 'requirement-not-met';
     } else if (audit.status === 'completed') {
       status = 'requirement-met';
+    } else {
+      // Log unexpected status values
+      console.warn(`Unexpected audit.status value: "${audit.status}", flagged: ${audit.flagged}`);
+      // Default to pending for unknown statuses
+      status = 'pending';
     }
-    
-    // Extract CID from id field (format: "audit_XXXXXX")
-    const cid = audit.id ? String(audit.id).replace('audit_', '') : 'N/A';
+
+    // Extract CID from id field (format: "audit_XXXXXX") and sanitize
+    const rawCid = audit.id ? String(audit.id).replace('audit_', '') : 'N/A';
+    const cid = escapeHTML(rawCid);
     const hoursLogged = Number(audit.hoursLogged) || 0;
-    const lastControlled = audit.lastSession ? formatDate(audit.lastSession) : 'Never';
+    const lastControlled = audit.lastSession ? escapeHTML(formatDate(audit.lastSession)) : 'Never';
 
     console.log(`Row: CID=${cid}, status=${status}, hours=${hoursLogged}, lastSession=${lastControlled}`);
 
@@ -175,7 +203,7 @@ function renderAuditTable(type) {
       <tr class="audit-row-${status}">
         <td>${cid}</td>
         <td>${createStatusBadge(status)}</td>
-        <td>${formatDuration(hoursLogged)}</td>
+        <td>${escapeHTML(formatDuration(hoursLogged))}</td>
         <td>${lastControlled}</td>
       </tr>
     `;

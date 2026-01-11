@@ -7,15 +7,6 @@ const API_BASE = 'https://vatsimactivitybot.therealleviticus.workers.dev/api';
 const KV_API_BASE = typeof window !== 'undefined'
   ? (window.KV_API_BASE || 'https://kv-reader.therealleviticus.workers.dev/api')
   : 'https://kv-reader.therealleviticus.workers.dev/api';
-// Optional: Public R2 JSON URL (set in index.html as window.R2_JSON_URL)
-const R2_JSON_URL = typeof window !== 'undefined' ? (window.R2_JSON_URL || null) : null;
-
-async function fetchR2Store() {
-  if (!R2_JSON_URL) throw new Error('R2_JSON_URL not configured');
-  const r = await fetch(R2_JSON_URL, { cache: 'no-cache' });
-  if (!r.ok) throw new Error(`R2 fetch failed: ${r.status}`);
-  return r.json();
-}
 
 class WatchlistAPI {
   constructor(baseURL = API_BASE) {
