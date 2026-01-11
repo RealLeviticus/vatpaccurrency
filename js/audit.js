@@ -21,6 +21,11 @@ import {
 let visitingData = [];
 let localData = [];
 let currentTab = 'visiting';
+const ITEMS_PER_PAGE = 25;
+let currentPage = {
+  visiting: 1,
+  local: 1
+};
 
 /**
  * Load audit data from API
@@ -54,6 +59,7 @@ async function loadAudits() {
 function renderAuditTable(type) {
   const data = type === 'visiting' ? visitingData : localData;
   const tbody = document.getElementById(`${type}TableBody`);
+  const pagination = document.getElementById(`${type}Pagination`);
 
   if (!data || data.length === 0) {
     tbody.innerHTML = `
@@ -66,10 +72,19 @@ function renderAuditTable(type) {
         </td>
       </tr>
     `;
+    if (pagination) pagination.style.display = 'none';
     return;
   }
 
-  tbody.innerHTML = data.map(audit => {
+  // Calculate pagination
+  const totalPages = Math.ceil(data.length / ITEMS_PER_PAGE);
+  const page = currentPage[type];
+  const startIdx = (page - 1) * ITEMS_PER_PAGE;
+  const endIdx = startIdx + ITEMS_PER_PAGE;
+  const pageData = data.slice(startIdx, endIdx);
+
+  // Render table rows
+  tbody.innerHTML = pageData.map(audit => {
     const status = audit.flagged ? 'requirement-not-met' : 'requirement-met';
     const hoursLogged = audit.hoursLogged || 0;
     const cid = audit.cid || 'N/A';
@@ -84,6 +99,9 @@ function renderAuditTable(type) {
       </tr>
     `;
   }).join('');
+
+  // Update pagination controls
+  updatePagination(type, page, totalPages, data.length);
 }
 
 /**
@@ -113,6 +131,66 @@ function switchTab(tabName) {
 
   // Render appropriate table
   renderAuditTable(tabName);
+}
+
+/**
+ * Update pagination controls
+ * @param {'visiting'|'local'} type - Audit type
+ * @param {number} currentPage - Current page number
+ * @param {number} totalPages - Total number of pages
+ * @param {number} totalItems - Total number of items
+ */
+function updatePagination(type, currentPage, totalPages, totalItems) {
+  const pagination = document.getElementById(`${type}Pagination`);
+  const pageInfo = document.getElementById(`${type}PageInfo`);
+  const prevBtn = document.getElementById(`${type}PrevBtn`);
+  const nextBtn = document.getElementById(`${type}NextBtn`);
+
+  if (!pagination || totalPages <= 1) {
+    if (pagination) pagination.style.display = 'none';
+    return;
+  }
+
+  pagination.style.display = 'flex';
+  
+  const startItem = (currentPage - 1) * ITEMS_PER_PAGE + 1;
+  const endItem = Math.min(currentPage * ITEMS_PER_PAGE, totalItems);
+  
+  pageInfo.textContent = `Showing ${startItem}-${endItem} of ${totalItems} (Page ${currentPage} of ${totalPages})`;
+  
+  prevBtn.disabled = currentPage === 1;
+  nextBtn.disabled = currentPage === totalPages;
+}
+
+/**
+ * Setup pagination buttons
+ * @param {'visiting'|'local'} type - Audit type
+ */
+function setupPagination(type) {
+  const prevBtn = document.getElementById(`${type}PrevBtn`);
+  const nextBtn = document.getElementById(`${type}NextBtn`);
+
+  if (prevBtn) {
+    prevBtn.addEventListener('click', () => {
+      if (currentPage[type] > 1) {
+        currentPage[type]--;
+        renderAuditTable(type);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    });
+  }
+
+  if (nextBtn) {
+    nextBtn.addEventListener('click', () => {
+      const data = type === 'visiting' ? visitingData : localData;
+      const totalPages = Math.ceil(data.length / ITEMS_PER_PAGE);
+      if (currentPage[type] < totalPages) {
+        currentPage[type]++;
+        renderAuditTable(type);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    });
+  }
 }
 
 // ==================== Search and Filter ====================
@@ -177,6 +255,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // Setup search and filter for both tabs
   setupSearch('visiting');
   setupSearch('local');
+
+  // Setup pagination for both tabs
+  setupPagination('visiting');
+  setupPagination('local');
 
   // Make tables sortable
   document.querySelectorAll('.data-table').forEach(table => {
