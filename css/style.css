@@ -299,6 +299,12 @@ body {
   border: 1px solid var(--border-color);
 }
 
+.badge-purple {
+  background-color: rgba(168, 85, 247, 0.15);
+  color: #a855f7;
+  border: 1px solid rgba(168, 85, 247, 0.3);
+}
+
 /* Rating badges */
 .badge-rating-student {
   background-color: rgba(234, 179, 8, 0.15);

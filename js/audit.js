@@ -75,7 +75,9 @@ function normalizeAuditRecord(audit, type = 'visiting') {
 
   // Determine status from the audit record
   let status = 'pending';
-  if (audit.status === 'pending') {
+  if (audit.status === 'not-division-member') {
+    status = 'not-division-member';
+  } else if (audit.status === 'pending') {
     status = 'pending';
   } else if (audit.status === 'flagged' || audit.flagged === true) {
     status = 'flagged';
@@ -97,9 +99,10 @@ function normalizeAuditRecord(audit, type = 'visiting') {
     type: audit.type || type,
     status,
     rating: audit.rating || 'N/A',
+    division: audit.division || null,
     hoursLogged,
     lastSession,
-    flagged: status === 'flagged'
+    flagged: status === 'flagged' || status === 'not-division-member'
   };
 }
 
@@ -157,6 +160,7 @@ function getFilteredData(type) {
       if (filters.status === 'pending' && audit.status !== 'pending') return false;
       if (filters.status === 'requirement-not-met' && audit.status !== 'flagged') return false;
       if (filters.status === 'requirement-met' && audit.status !== 'completed') return false;
+      if (filters.status === 'not-division-member' && audit.status !== 'not-division-member') return false;
     }
 
     // Apply search filter (search CID)
@@ -229,7 +233,9 @@ function renderAuditTable(type) {
 
     // Determine status display based on actual status values
     let status = 'requirement-met';
-    if (audit.status === 'pending') {
+    if (audit.status === 'not-division-member') {
+      status = 'not-division-member';
+    } else if (audit.status === 'pending') {
       status = 'pending';
     } else if (audit.status === 'flagged' || audit.flagged === true) {
       status = 'requirement-not-met';
