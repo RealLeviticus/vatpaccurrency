@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="VATPAC Controller Watchlist - Monitor VATSIM controller activity">
+  <title>VATPAC Watchlist - Dashboard</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- Navigation -->
+  <nav class="navbar">
+    <a href="index.html" class="nav-brand">VATPAC Watchlist</a>
+    <ul class="nav-menu">
+      <li><a href="index.html" class="active">Dashboard</a></li>
+      <li><a href="audit.html">Audits</a></li>
+      <li><a href="watchlist.html">Watchlist</a></li>
+    </ul>
+  </nav>
+
+  <!-- Main Content -->
+  <main class="container">
+    <!-- Stats Grid -->
+    <section class="stats-grid">
+      <div class="stat-card">
+        <h3>Watched Controllers</h3>
+        <p class="stat-value" id="totalWatched">-</p>
+      </div>
+      <div class="stat-card">
+        <h3>Active Audits</h3>
+        <p class="stat-value" id="activeAudits">-</p>
+      </div>
+      <div class="stat-card">
+        <h3>Online Now</h3>
+        <p class="stat-value" id="onlineNow">-</p>
+      </div>
+      <div class="stat-card">
+        <h3>Completed Audits</h3>
+        <p class="stat-value" id="completedAudits">-</p>
+      </div>
+    </section>
+
+    <!-- Currently Online Controllers -->
+    <section class="presence-section">
+      <h2>Currently Online Controllers</h2>
+      <div id="presenceList" class="presence-list">
+        <!-- Dynamically populated by dashboard.js -->
+        <div class="empty-state">
+          <div class="empty-state-icon">⏳</div>
+          <p>Loading...</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- JavaScript Modules -->
+  <script type="module" src="js/dashboard.js"></script>
+</body>
+</html>

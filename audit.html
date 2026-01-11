@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="VATPAC Controller Audit Results - View visiting and local controller activity">
+  <title>VATPAC Watchlist - Audit Results</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- Navigation -->
+  <nav class="navbar">
+    <a href="index.html" class="nav-brand">VATPAC Watchlist</a>
+    <ul class="nav-menu">
+      <li><a href="index.html">Dashboard</a></li>
+      <li><a href="audit.html" class="active">Audits</a></li>
+      <li><a href="watchlist.html">Watchlist</a></li>
+    </ul>
+  </nav>
+
+  <!-- Main Content -->
+  <main class="container">
+    <div class="page-header">
+      <h1>Controller Audits</h1>
+      <div class="tab-switcher">
+        <button class="tab-btn active" data-tab="visiting">Visiting</button>
+        <button class="tab-btn" data-tab="local">Local</button>
+      </div>
+    </div>
+
+    <!-- Visiting Audit Tab -->
+    <section id="visitingTab" class="audit-tab active">
+      <h2>Visiting Controller Audits</h2>
+      <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+        Visiting controllers must log at least 10 hours of AU/PAC controlling activity over 3 months.
+      </p>
+
+      <div class="table-controls">
+        <input
+          type="search"
+          id="visitingSearch"
+          placeholder="Search by CID or name..."
+          aria-label="Search visiting audits"
+        >
+        <select id="visitingFilter" aria-label="Filter by status">
+          <option value="all">All Statuses</option>
+          <option value="active">Active Only</option>
+          <option value="completed">Completed Only</option>
+          <option value="pending">Pending Only</option>
+        </select>
+      </div>
+
+      <div class="table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th data-sort="cid">CID</th>
+              <th data-sort="name">Name</th>
+              <th data-sort="status">Status</th>
+              <th data-sort="hours">Hours Logged</th>
+              <th data-sort="ticks">Ticks Remaining</th>
+              <th data-sort="started">Started</th>
+              <th data-sort="completed">Completed</th>
+              <th>Progress</th>
+            </tr>
+          </thead>
+          <tbody id="visitingTableBody">
+            <!-- Dynamically populated by audit.js -->
+            <tr>
+              <td colspan="8" style="text-align: center;">
+                <div class="empty-state">
+                  <div class="empty-state-icon">⏳</div>
+                  <p>Loading...</p>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Local Audit Tab -->
+    <section id="localTab" class="audit-tab">
+      <h2>Local Controller Audits</h2>
+      <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+        Local controllers must log at least 15 hours of AU/PAC controlling activity over 3 months.
+      </p>
+
+      <div class="table-controls">
+        <input
+          type="search"
+          id="localSearch"
+          placeholder="Search by CID or name..."
+          aria-label="Search local audits"
+        >
+        <select id="localFilter" aria-label="Filter by status">
+          <option value="all">All Statuses</option>
+          <option value="active">Active Only</option>
+          <option value="completed">Completed Only</option>
+          <option value="pending">Pending Only</option>
+        </select>
+      </div>
+
+      <div class="table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th data-sort="cid">CID</th>
+              <th data-sort="name">Name</th>
+              <th data-sort="status">Status</th>
+              <th data-sort="hours">Hours Logged</th>
+              <th data-sort="ticks">Ticks Remaining</th>
+              <th data-sort="started">Started</th>
+              <th data-sort="completed">Completed</th>
+              <th>Progress</th>
+            </tr>
+          </thead>
+          <tbody id="localTableBody">
+            <!-- Dynamically populated by audit.js -->
+            <tr>
+              <td colspan="8" style="text-align: center;">
+                <div class="empty-state">
+                  <div class="empty-state-icon">⏳</div>
+                  <p>Loading...</p>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- JavaScript Modules -->
+  <script type="module" src="js/audit.js"></script>
+</body>
+</html>
