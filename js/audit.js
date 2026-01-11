@@ -28,20 +28,27 @@ let currentPage = {
 };
 
 /**
- * Load audit data from API
+ * Load audit data from API (directly from KV)
  */
 async function loadAudits() {
   try {
     showLoading('Loading audit results...');
 
-    const [visiting, local] = await Promise.all([
-      api.getVisitingAudit().catch(() => ({active: [], completed: [], stats: {}})),
-      api.getLocalAudit().catch(() => ({active: [], completed: [], stats: {}}))
-    ]);
+    // Fetch directly from KV endpoint for faster, always up-to-date data
+    const kvData = await api.getKVData().catch(() => null);
 
-    // Combine active and completed audits
-    visitingData = [...(visiting.active || []), ...(visiting.completed || [])];
-    localData = [...(local.active || []), ...(local.completed || [])];
+    if (kvData) {
+      visitingData = kvData.visiting || [];
+      localData = kvData.local || [];
+    } else {
+      // Fallback to old endpoint structure
+      const [visiting, local] = await Promise.all([
+        api.getVisitingAudit().catch(() => ({active: [], completed: [], stats: {}})),
+        api.getLocalAudit().catch(() => ({active: [], completed: [], stats: {}}))
+      ]);
+      visitingData = [...(visiting.active || []), ...(visiting.completed || [])];
+      localData = [...(local.active || []), ...(local.completed || [])];
+    }
 
     renderAuditTable(currentTab);
     hideLoading();

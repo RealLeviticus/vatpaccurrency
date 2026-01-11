@@ -90,6 +90,14 @@ class WatchlistAPI {
   // ==================== Audit Endpoints ====================
 
   /**
+   * Get raw KV data directly (faster, always up-to-date)
+   * @returns {Promise<{visiting: Array, local: Array, lastRun: string, batchProgress: object}>}
+   */
+  async getKVData() {
+    return this.request('/kv');
+  }
+
+  /**
    * Get visiting controller audit results
    * @returns {Promise<{active: Array, completed: Array, stats: object}>}
    */
