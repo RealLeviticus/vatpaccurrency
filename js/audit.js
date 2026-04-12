@@ -183,12 +183,10 @@ function renderAuditTable(type) {
   const tbody = document.getElementById(`${type}TableBody`);
   const pagination = document.getElementById(`${type}Pagination`);
 
-  const colCount = type === 'local' ? 6 : 5;
-
   if (!allData || allData.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="${colCount}" style="text-align: center;">
+        <td colspan="5" style="text-align: center;">
           <div class="empty-state">
             <div class="empty-state-icon">📊</div>
             <p>No ${type} audit data available</p>
@@ -206,7 +204,7 @@ function renderAuditTable(type) {
   if (data.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="${colCount}" style="text-align: center;">
+        <td colspan="5" style="text-align: center;">
           <div class="empty-state">
             <div class="empty-state-icon">🔍</div>
             <p>No results found for current search/filter</p>
@@ -259,20 +257,10 @@ function renderAuditTable(type) {
 
     console.log(`Row: CID=${cid}, rating=${rating}, status=${status}, hours=${hoursLogged}, lastSession=${lastControlled}`);
 
-    let divisionCell = '';
-    if (type === 'local') {
-      const div = audit.division ? escapeHTML(audit.division) : null;
-      const isPAC = div && div.toUpperCase() === 'PAC';
-      const badgeClass = div ? (isPAC ? 'badge-success' : 'badge-danger') : 'badge-secondary';
-      const badgeText = div || 'Unknown';
-      divisionCell = `<td><span class="badge ${badgeClass}">${badgeText}</span></td>`;
-    }
-
     return `
       <tr class="audit-row-${status}">
         <td>${cid}</td>
         <td>${createRatingBadge(rating)}</td>
-        ${divisionCell}
         <td>${createStatusBadge(status)}</td>
         <td>${escapeHTML(formatDuration(hoursLogged))}</td>
         <td>${lastControlled}</td>
