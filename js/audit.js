@@ -261,12 +261,11 @@ function renderAuditTable(type) {
 
     let divisionCell = '';
     if (type === 'local') {
-      const div = audit.division ? escapeHTML(audit.division) : '—';
-      const isPAC = audit.division && audit.division.toUpperCase() === 'PAC';
-      const divColor = audit.division
-        ? (isPAC ? 'var(--accent-green)' : 'var(--accent-red)')
-        : 'var(--text-muted)';
-      divisionCell = `<td><span style="color: ${divColor}; font-weight: 600;">${div}</span></td>`;
+      const div = audit.division ? escapeHTML(audit.division) : null;
+      const isPAC = div && div.toUpperCase() === 'PAC';
+      const badgeClass = div ? (isPAC ? 'badge-success' : 'badge-danger') : 'badge-secondary';
+      const badgeText = div || 'Unknown';
+      divisionCell = `<td><span class="badge ${badgeClass}">${badgeText}</span></td>`;
     }
 
     return `
