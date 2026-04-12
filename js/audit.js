@@ -183,10 +183,12 @@ function renderAuditTable(type) {
   const tbody = document.getElementById(`${type}TableBody`);
   const pagination = document.getElementById(`${type}Pagination`);
 
+  const colCount = type === 'local' ? 6 : 5;
+
   if (!allData || allData.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="5" style="text-align: center;">
+        <td colspan="${colCount}" style="text-align: center;">
           <div class="empty-state">
             <div class="empty-state-icon">📊</div>
             <p>No ${type} audit data available</p>
@@ -204,7 +206,7 @@ function renderAuditTable(type) {
   if (data.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="5" style="text-align: center;">
+        <td colspan="${colCount}" style="text-align: center;">
           <div class="empty-state">
             <div class="empty-state-icon">🔍</div>
             <p>No results found for current search/filter</p>
@@ -257,10 +259,21 @@ function renderAuditTable(type) {
 
     console.log(`Row: CID=${cid}, rating=${rating}, status=${status}, hours=${hoursLogged}, lastSession=${lastControlled}`);
 
+    let divisionCell = '';
+    if (type === 'local') {
+      const div = audit.division ? escapeHTML(audit.division) : '—';
+      const isPAC = audit.division && audit.division.toUpperCase() === 'PAC';
+      const divColor = audit.division
+        ? (isPAC ? 'var(--accent-green)' : 'var(--accent-red)')
+        : 'var(--text-muted)';
+      divisionCell = `<td><span style="color: ${divColor}; font-weight: 600;">${div}</span></td>`;
+    }
+
     return `
       <tr class="audit-row-${status}">
         <td>${cid}</td>
         <td>${createRatingBadge(rating)}</td>
+        ${divisionCell}
         <td>${createStatusBadge(status)}</td>
         <td>${escapeHTML(formatDuration(hoursLogged))}</td>
         <td>${lastControlled}</td>
@@ -350,8 +363,8 @@ function setupPagination(type) {
 
   if (nextBtn) {
     nextBtn.addEventListener('click', () => {
-      const data = type === 'visiting' ? visitingData : localData;
-      const totalPages = Math.ceil(data.length / ITEMS_PER_PAGE);
+      const filteredData = getFilteredData(type);
+      const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
       if (currentPage[type] < totalPages) {
         currentPage[type]++;
         renderAuditTable(type);
