@@ -5,17 +5,13 @@
 
 import api from './api.js';
 import {
-  sortTable,
-  filterTable,
   formatDate,
   formatDuration,
-  createProgressBar,
   createStatusBadge,
   createRatingBadge,
   showError,
   showLoading,
   hideLoading,
-  makeTableSortable,
   debounce,
   escapeHTML
 } from './utils.js';
@@ -35,10 +31,15 @@ let activeFilters = {
   local: { search: '', status: 'all' }
 };
 
+// Active sort state
+let activeSort = {
+  visiting: { column: null, ascending: true },
+  local: { column: null, ascending: true }
+};
+
 // Normalize audit records to the simplified schema the UI expects
 function normalizeAuditRecord(audit, type = 'visiting') {
   if (!audit) {
-    console.warn('normalizeAuditRecord received null/undefined audit');
     return {
       id: 'audit_unknown',
       type,
@@ -65,7 +66,6 @@ function normalizeAuditRecord(audit, type = 'visiting') {
     if (rawCid) {
       id = `audit_${rawCid}`;
     } else {
-      console.warn('Could not extract CID from audit record:', audit);
       id = `audit_unknown_${Math.random().toString(36).slice(2)}`;
     }
   }
@@ -116,12 +116,9 @@ async function loadAudits() {
     // Fetch directly from KV endpoint for faster, always up-to-date data
     const kvData = await api.getKVData().catch(() => null);
 
-    console.log('KV Data received:', kvData);
-
     if (kvData) {
       visitingData = (kvData.visiting || []).map(a => normalizeAuditRecord(a, 'visiting'));
       localData = (kvData.local || []).map(a => normalizeAuditRecord(a, 'local'));
-      console.log(`Loaded ${visitingData.length} visiting and ${localData.length} local records`);
     } else {
       // Fallback to old endpoint structure
       const [visiting, local] = await Promise.all([
@@ -140,6 +137,23 @@ async function loadAudits() {
     console.error('Failed to load audits:', error);
     showError(`Failed to load audit data: ${error.message}`);
     hideLoading();
+    // Show retry button in table bodies
+    ['visiting', 'local'].forEach(type => {
+      const tbody = document.getElementById(`${type}TableBody`);
+      if (tbody) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="5" style="text-align: center;">
+              <div class="empty-state">
+                <div class="empty-state-icon">⚠️</div>
+                <p>${escapeHTML(`Failed to load data: ${error.message}`)}</p>
+                <button class="btn-secondary btn-sm" style="margin-top: 1rem;" onclick="location.reload()">Retry</button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }
+    });
   }
 }
 
@@ -219,17 +233,16 @@ function renderAuditTable(type) {
 
   // Calculate pagination
   const totalPages = Math.ceil(data.length / ITEMS_PER_PAGE);
+  // Clamp page to valid range
+  if (currentPage[type] > totalPages) currentPage[type] = totalPages;
+  if (currentPage[type] < 1) currentPage[type] = 1;
   const page = currentPage[type];
   const startIdx = (page - 1) * ITEMS_PER_PAGE;
   const endIdx = startIdx + ITEMS_PER_PAGE;
   const pageData = data.slice(startIdx, endIdx);
 
-  console.log(`Rendering ${type}: page ${page}/${totalPages}, showing ${pageData.length} of ${data.length} total items`);
-
   // Render table rows
-  console.log('Rendering table with data:', pageData);
   tbody.innerHTML = pageData.map(audit => {
-    console.log('Processing audit record:', audit);
 
     // Determine status display based on actual status values
     let status = 'requirement-met';
@@ -242,8 +255,6 @@ function renderAuditTable(type) {
     } else if (audit.status === 'completed') {
       status = 'requirement-met';
     } else {
-      // Log unexpected status values
-      console.warn(`Unexpected audit.status value: "${audit.status}", flagged: ${audit.flagged}`);
       // Default to pending for unknown statuses
       status = 'pending';
     }
@@ -254,8 +265,6 @@ function renderAuditTable(type) {
     const rating = escapeHTML(audit.rating || 'N/A');
     const hoursLogged = Number(audit.hoursLogged) || 0;
     const lastControlled = audit.lastSession ? escapeHTML(formatDate(audit.lastSession)) : 'Never';
-
-    console.log(`Row: CID=${cid}, rating=${rating}, status=${status}, hours=${hoursLogged}, lastSession=${lastControlled}`);
 
     return `
       <tr class="audit-row-${status}">
@@ -281,20 +290,14 @@ function switchTab(tabName) {
 
   // Update tab buttons
   document.querySelectorAll('.tab-btn').forEach(btn => {
-    if (btn.dataset.tab === tabName) {
-      btn.classList.add('active');
-    } else {
-      btn.classList.remove('active');
-    }
+    const isActive = btn.dataset.tab === tabName;
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-selected', isActive);
   });
 
   // Update tab content
   document.querySelectorAll('.audit-tab').forEach(tab => {
-    if (tab.id === `${tabName}Tab`) {
-      tab.classList.add('active');
-    } else {
-      tab.classList.remove('active');
-    }
+    tab.classList.toggle('active', tab.id === `${tabName}Tab`);
   });
 
   // Render appropriate table
@@ -308,7 +311,7 @@ function switchTab(tabName) {
  * @param {number} totalPages - Total number of pages
  * @param {number} totalItems - Total number of items
  */
-function updatePagination(type, currentPage, totalPages, totalItems) {
+function updatePagination(type, pageNum, totalPages, totalItems) {
   const pagination = document.getElementById(`${type}Pagination`);
   const pageInfo = document.getElementById(`${type}PageInfo`);
   const prevBtn = document.getElementById(`${type}PrevBtn`);
@@ -321,13 +324,15 @@ function updatePagination(type, currentPage, totalPages, totalItems) {
 
   pagination.style.display = 'flex';
   
-  const startItem = (currentPage - 1) * ITEMS_PER_PAGE + 1;
-  const endItem = Math.min(currentPage * ITEMS_PER_PAGE, totalItems);
+  const startItem = (pageNum - 1) * ITEMS_PER_PAGE + 1;
+  const endItem = Math.min(pageNum * ITEMS_PER_PAGE, totalItems);
   
-  pageInfo.textContent = `Showing ${startItem}-${endItem} of ${totalItems} (Page ${currentPage} of ${totalPages})`;
+  pageInfo.textContent = `Showing ${startItem}-${endItem} of ${totalItems} (Page ${pageNum} of ${totalPages})`;
   
-  prevBtn.disabled = currentPage === 1;
-  nextBtn.disabled = currentPage === totalPages;
+  prevBtn.disabled = pageNum === 1;
+  nextBtn.disabled = pageNum === totalPages;
+  prevBtn.setAttribute('aria-disabled', pageNum === 1);
+  nextBtn.setAttribute('aria-disabled', pageNum === totalPages);
 }
 
 /**
@@ -343,7 +348,11 @@ function setupPagination(type) {
       if (currentPage[type] > 1) {
         currentPage[type]--;
         renderAuditTable(type);
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        // Scroll to table, not top of page
+        const tableWrapper = document.querySelector(`#${type}Tab .table-wrapper`);
+        if (tableWrapper) {
+          tableWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
       }
     });
   }
@@ -355,7 +364,11 @@ function setupPagination(type) {
       if (currentPage[type] < totalPages) {
         currentPage[type]++;
         renderAuditTable(type);
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        // Scroll to table, not top of page
+        const tableWrapper = document.querySelector(`#${type}Tab .table-wrapper`);
+        if (tableWrapper) {
+          tableWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
       }
     });
   }
@@ -402,6 +415,72 @@ function setupSearch(type) {
   }
 }
 
+// ==================== Data-level Sorting ====================
+
+/**
+ * Sort column key to audit record accessor
+ */
+const SORT_ACCESSORS = {
+  cid: audit => {
+    const raw = audit.id ? String(audit.id).replace('audit_', '') : '';
+    return parseInt(raw, 10) || 0;
+  },
+  rating: audit => audit.rating || '',
+  status: audit => audit.status || '',
+  hours: audit => Number(audit.hoursLogged) || 0,
+  lastControlled: audit => audit.lastSession ? new Date(audit.lastSession).getTime() : 0
+};
+
+/**
+ * Setup sortable column headers for a table (sorts backing data, not DOM)
+ * @param {'visiting'|'local'} type - Audit type
+ */
+function setupDataSort(type) {
+  const tab = document.getElementById(`${type}Tab`);
+  if (!tab) return;
+
+  const headers = tab.querySelectorAll('th[data-sort]');
+  headers.forEach(header => {
+    header.classList.add('sortable');
+    header.style.cursor = 'pointer';
+
+    header.addEventListener('click', () => {
+      const key = header.dataset.sort;
+      const accessor = SORT_ACCESSORS[key];
+      if (!accessor) return;
+
+      // Toggle direction
+      if (activeSort[type].column === key) {
+        activeSort[type].ascending = !activeSort[type].ascending;
+      } else {
+        activeSort[type].column = key;
+        activeSort[type].ascending = true;
+      }
+
+      const asc = activeSort[type].ascending;
+      const data = type === 'visiting' ? visitingData : localData;
+
+      data.sort((a, b) => {
+        const aVal = accessor(a);
+        const bVal = accessor(b);
+        if (typeof aVal === 'number' && typeof bVal === 'number') {
+          return asc ? aVal - bVal : bVal - aVal;
+        }
+        return asc
+          ? String(aVal).localeCompare(String(bVal))
+          : String(bVal).localeCompare(String(aVal));
+      });
+
+      // Update aria-sort on all headers
+      headers.forEach(h => h.removeAttribute('aria-sort'));
+      header.setAttribute('aria-sort', asc ? 'ascending' : 'descending');
+
+      currentPage[type] = 1;
+      renderAuditTable(type);
+    });
+  });
+}
+
 // ==================== Initialize ====================
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -424,10 +503,9 @@ document.addEventListener('DOMContentLoaded', () => {
   setupPagination('visiting');
   setupPagination('local');
 
-  // Make tables sortable
-  document.querySelectorAll('.data-table').forEach(table => {
-    makeTableSortable(table);
-  });
+  // Setup data-level sorting for both tabs
+  setupDataSort('visiting');
+  setupDataSort('local');
 
   // Add manual refresh button functionality if it exists
   const refreshBtn = document.getElementById('refreshAudits');

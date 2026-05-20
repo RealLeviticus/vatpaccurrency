@@ -1,0 +1,14 @@
+# KV Reader Worker
+# Read-only access to VATPAC audit data in KV
+# Deploy: npx wrangler deploy -c workers/kv-reader.toml
+
+name = "kv-reader"
+main = "../kv-reader.js"
+compatibility_date = "2024-01-01"
+
+# KV Namespace bindings
+# Replace <KV_NAMESPACE_ID> with your actual vatpac-audits namespace ID
+# Find it: npx wrangler kv namespace list
+[[kv_namespaces]]
+binding = "hours"
+id = "eed282e8c3c54680981aa1e60520eaf6"

@@ -236,7 +236,7 @@ export function createStatusBadge(status, text = null) {
   const badgeClass = badges[status] || 'badge-secondary';
   const badgeText = text || statusText[status] || status.charAt(0).toUpperCase() + status.slice(1);
 
-  return `<span class="badge ${badgeClass}">${badgeText}</span>`;
+  return `<span class="badge ${badgeClass}">${escapeHTML(badgeText)}</span>`;
 }
 
 // ==================== Error Handling ====================
@@ -247,9 +247,10 @@ export function createStatusBadge(status, text = null) {
  * @param {HTMLElement} container - Container element (optional)
  */
 export function showError(message, container = null) {
+  const safe = escapeHTML(message);
   const errorHTML = `
-    <div class="status-message status-error">
-      ${message}
+    <div class="status-message status-error" role="alert">
+      ${safe}
     </div>
   `;
 
@@ -259,6 +260,7 @@ export function showError(message, container = null) {
     // Create toast notification
     const toast = document.createElement('div');
     toast.className = 'status-message status-error';
+    toast.setAttribute('role', 'alert');
     toast.style.position = 'fixed';
     toast.style.top = '20px';
     toast.style.right = '20px';
@@ -276,9 +278,10 @@ export function showError(message, container = null) {
  * @param {HTMLElement} container - Container element (optional)
  */
 export function showSuccess(message, container = null) {
+  const safe = escapeHTML(message);
   const successHTML = `
-    <div class="status-message status-success">
-      ${message}
+    <div class="status-message status-success" role="status">
+      ${safe}
     </div>
   `;
 
@@ -288,6 +291,7 @@ export function showSuccess(message, container = null) {
     // Create toast notification
     const toast = document.createElement('div');
     toast.className = 'status-message status-success';
+    toast.setAttribute('role', 'status');
     toast.style.position = 'fixed';
     toast.style.top = '20px';
     toast.style.right = '20px';
@@ -312,12 +316,23 @@ export function showLoading(message = 'Loading...') {
   const overlay = document.createElement('div');
   overlay.id = 'loadingOverlay';
   overlay.className = 'loading-overlay';
-  overlay.innerHTML = `
-    <div class="loading"></div>
-    <p style="color: var(--text-secondary); margin-top: 1rem;">${message}</p>
-  `;
+  overlay.setAttribute('role', 'status');
+  overlay.setAttribute('aria-live', 'polite');
 
+  const spinner = document.createElement('div');
+  spinner.className = 'loading';
+
+  const text = document.createElement('p');
+  text.style.cssText = 'color: var(--text-secondary); margin-top: 1rem;';
+  text.textContent = message;
+
+  overlay.appendChild(spinner);
+  overlay.appendChild(text);
   document.body.appendChild(overlay);
+
+  // Set aria-busy on main content
+  const main = document.querySelector('main');
+  if (main) main.setAttribute('aria-busy', 'true');
 }
 
 /**
@@ -328,6 +343,8 @@ export function hideLoading() {
   if (overlay) {
     overlay.remove();
   }
+  const main = document.querySelector('main');
+  if (main) main.removeAttribute('aria-busy');
 }
 
 // ==================== Validation ====================
@@ -347,10 +364,9 @@ export function isValidCID(cid) {
  * @param {string} str - String to sanitize
  * @returns {string} Sanitized string
  */
+const ESC_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 export function escapeHTML(str) {
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
+  return String(str).replace(/[&<>"']/g, c => ESC_MAP[c]);
 }
 
 // ==================== Table Setup ====================

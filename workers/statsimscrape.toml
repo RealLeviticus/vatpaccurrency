@@ -1,0 +1,25 @@
+# StatSim Scrape Worker
+# Fetches StatSim position session data for all VATPAC callsigns
+# Deploy: npx wrangler deploy -c workers/statsimscrape.toml
+
+name = "statsimscrape"
+main = "../statsimworker.js"
+compatibility_date = "2026-01-11"
+preview_urls = false
+
+[vars]
+WORKER_URL = "https://statsimscrape.therealleviticus.workers.dev/"
+
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true
+
+# Cron trigger - every 3 minutes to resume paginated fetching
+[triggers]
+crons = ["*/3 * * * *"]
+
+[[kv_namespaces]]
+binding = "sessions"
+id = "eed282e8c3c54680981aa1e60520eaf6"
