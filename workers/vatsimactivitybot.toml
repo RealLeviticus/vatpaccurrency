@@ -1,0 +1,22 @@
+# VATSIM Activity Bot Worker (main audit worker)
+# Runs daily audit checks against VATSIM data
+# Deploy: npx wrangler deploy -c workers/vatsimactivitybot.toml
+
+name = "vatsimactivitybot"
+main = "../worker-complete.js"
+compatibility_date = "2024-01-01"
+
+# Daily cron trigger
+[triggers]
+crons = ["0 12 * * *"]
+
+# KV Namespace bindings
+# Replace <KV_NAMESPACE_ID> with your actual vatpac-audits namespace ID
+# Find it: npx wrangler kv namespace list
+[[kv_namespaces]]
+binding = "hours"
+id = "eed282e8c3c54680981aa1e60520eaf6"
+
+[[kv_namespaces]]
+binding = "sessions"
+id = "eed282e8c3c54680981aa1e60520eaf6"

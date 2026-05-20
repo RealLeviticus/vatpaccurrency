@@ -4,9 +4,7 @@
  */
 
 const API_BASE = 'https://vatsimactivitybot.therealleviticus.workers.dev/api';
-const KV_API_BASE = typeof window !== 'undefined'
-  ? (window.KV_API_BASE || 'https://kv-reader.therealleviticus.workers.dev/api')
-  : 'https://kv-reader.therealleviticus.workers.dev/api';
+const KV_API_BASE = 'https://kv-reader.therealleviticus.workers.dev/api';
 
 class WatchlistAPI {
   constructor(baseURL = API_BASE) {

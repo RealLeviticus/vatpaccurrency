@@ -7,6 +7,8 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src https://kv-reader.therealleviticus.workers.dev https://vatsimactivitybot.therealleviticus.workers.dev; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <meta name="color-scheme" content="dark">
   <title>VATPAC Controller Audits</title>
   <link rel="stylesheet" href="css/style.css?v=5">
 </head>
@@ -20,14 +22,14 @@
   <main class="container">
     <div class="page-header">
       <h1>Controller Audits</h1>
-      <div class="tab-switcher">
-        <button class="tab-btn active" data-tab="visiting">Visiting</button>
-        <button class="tab-btn" data-tab="local">Local</button>
+      <div class="tab-switcher" role="tablist" aria-label="Audit type">
+        <button class="tab-btn active" data-tab="visiting" role="tab" aria-selected="true" aria-controls="visitingTab" id="tab-visiting">Visiting</button>
+        <button class="tab-btn" data-tab="local" role="tab" aria-selected="false" aria-controls="localTab" id="tab-local">Local</button>
       </div>
     </div>
 
     <!-- Visiting Audit Tab -->
-    <section id="visitingTab" class="audit-tab active">
+    <section id="visitingTab" class="audit-tab active" role="tabpanel" aria-labelledby="tab-visiting">
       <h2 style="color: var(--text-primary); margin-bottom: 1rem; font-size: 1.5rem;">Visiting Controller Audits</h2>
       <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">
         Visiting controllers must log at least <strong>3 hours</strong> on VATPAC positions per 3 months to remain current on the roster.
@@ -73,14 +75,14 @@
       </div>
       
       <div class="pagination" id="visitingPagination" style="display: none;">
-        <button class="pagination-btn" id="visitingPrevBtn">← Previous</button>
-        <div class="pagination-info" id="visitingPageInfo">Page 1 of 1</div>
-        <button class="pagination-btn" id="visitingNextBtn">Next →</button>
+        <button class="pagination-btn" id="visitingPrevBtn" aria-label="Previous page">← Previous</button>
+        <div class="pagination-info" id="visitingPageInfo" aria-live="polite">Page 1 of 1</div>
+        <button class="pagination-btn" id="visitingNextBtn" aria-label="Next page">Next →</button>
       </div>
     </section>
 
     <!-- Local Audit Tab -->
-    <section id="localTab" class="audit-tab">
+    <section id="localTab" class="audit-tab" role="tabpanel" aria-labelledby="tab-local">
       <h2 style="color: var(--text-primary); margin-bottom: 1rem; font-size: 1.5rem;">Local Controller Audits</h2>
       <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">
         Local controllers must log at least <strong>one session per 12 months</strong> on VATPAC positions to remain current on the roster.
@@ -127,9 +129,9 @@
       </div>
       
       <div class="pagination" id="localPagination" style="display: none;">
-        <button class="pagination-btn" id="localPrevBtn">← Previous</button>
-        <div class="pagination-info" id="localPageInfo">Page 1 of 1</div>
-        <button class="pagination-btn" id="localNextBtn">Next →</button>
+        <button class="pagination-btn" id="localPrevBtn" aria-label="Previous page">← Previous</button>
+        <div class="pagination-info" id="localPageInfo" aria-live="polite">Page 1 of 1</div>
+        <button class="pagination-btn" id="localNextBtn" aria-label="Next page">Next →</button>
       </div>
     </section>
   </main>
