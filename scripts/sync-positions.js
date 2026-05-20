@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 /**
  * Sync VATPAC positions from vatSys GitHub datasets
- * Fetches Sectors.xml from both australia-dataset and pacific-dataset,
+ * Fetches both Sectors.xml AND Positions.xml from australia-dataset and pacific-dataset,
  * extracts all VATSIM callsigns, and generates a shared positions.js module.
  *
- * Sectors.xml is the authoritative source: each <Sector> has a Callsign attribute
- * that is the actual VATSIM callsign used on the network.
+ * Sources:
+ *   - Sectors.xml: Each <Sector> has a Callsign attribute (primary source)
+ *   - Positions.xml: Each <Position> has <ControllerInfo Callsign="..."> elements
  *
- * Non-VATPAC sectors (neighboring FIRs like Indonesia, NZ, Fiji, etc.)
- * are identified by DisplayInSectorsWindow="False" and excluded.
+ * Non-VATPAC sectors (neighboring FIRs) identified by DisplayInSectorsWindow="False"
+ * are excluded from Sectors.xml parsing.
  *
  * Usage: node scripts/sync-positions.js
  */
@@ -17,16 +18,9 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
-const SOURCES = [
-  {
-    name: 'australia-dataset',
-    url: 'https://raw.githubusercontent.com/vatSys/australia-dataset/refs/heads/master/Sectors.xml'
-  },
-  {
-    name: 'pacific-dataset',
-    url: 'https://raw.githubusercontent.com/vatSys/pacific-dataset/refs/heads/master/Sectors.xml'
-  }
-];
+const DATASETS = ['australia-dataset', 'pacific-dataset'];
+const BASE_URL = 'https://raw.githubusercontent.com/vatSys';
+const FILES = ['Sectors.xml', 'Positions.xml'];
 
 function fetch(url) {
   return new Promise((resolve, reject) => {
@@ -53,26 +47,34 @@ function fetch(url) {
  * Sectors with DisplayInSectorsWindow="False" are neighboring FIR sectors
  * (Indonesia, NZ, Fiji, PNG, etc.) and are excluded.
  */
-function extractCallsigns(xml) {
+function extractFromSectors(xml) {
   const callsigns = new Set();
-
-  // Match each <Sector ...> element (self-closing or with body)
   const sectorRegex = /<Sector\s+([^>]+?)(?:\/>|>)/g;
   let match;
 
   while ((match = sectorRegex.exec(xml)) !== null) {
     const attrs = match[1];
-
-    // Skip non-VATPAC sectors (neighboring FIRs)
-    if (/DisplayInSectorsWindow\s*=\s*"False"/i.test(attrs)) {
-      continue;
-    }
-
-    // Extract Callsign attribute
+    if (/DisplayInSectorsWindow\s*=\s*"False"/i.test(attrs)) continue;
     const csMatch = attrs.match(/Callsign\s*=\s*"([^"]+)"/);
-    if (csMatch) {
-      callsigns.add(csMatch[1]);
-    }
+    if (csMatch) callsigns.add(csMatch[1]);
+  }
+
+  return callsigns;
+}
+
+/**
+ * Extract callsigns from Positions.xml content.
+ * Each <Position> contains <ControllerInfo Callsign="XX_YYY"> elements.
+ */
+function extractFromPositions(xml) {
+  const callsigns = new Set();
+  const ciRegex = /<ControllerInfo\s+([^>]+?)(?:\/>|>)/g;
+  let match;
+
+  while ((match = ciRegex.exec(xml)) !== null) {
+    const attrs = match[1];
+    const csMatch = attrs.match(/Callsign\s*=\s*"([^"]+)"/);
+    if (csMatch) callsigns.add(csMatch[1]);
   }
 
   return callsigns;
@@ -82,19 +84,26 @@ async function main() {
   console.log('Syncing VATPAC positions from vatSys GitHub datasets...\n');
 
   const allCallsigns = new Set();
-  const sourceInfo = {};
 
-  for (const source of SOURCES) {
-    try {
-      console.log(`Fetching ${source.name}...`);
-      const xml = await fetch(source.url);
-      const callsigns = extractCallsigns(xml);
-      sourceInfo[source.name] = callsigns.size;
-      console.log(`  Found ${callsigns.size} callsigns`);
-      callsigns.forEach(cs => allCallsigns.add(cs));
-    } catch (err) {
-      console.error(`  ERROR fetching ${source.name}: ${err.message}`);
+  for (const dataset of DATASETS) {
+    console.log(`Fetching ${dataset}...`);
+    let datasetCount = 0;
+
+    for (const file of FILES) {
+      try {
+        const url = `${BASE_URL}/${dataset}/refs/heads/master/${file}`;
+        const xml = await fetch(url);
+        const callsigns = file === 'Sectors.xml'
+          ? extractFromSectors(xml)
+          : extractFromPositions(xml);
+        console.log(`  ${file}: ${callsigns.size} callsigns`);
+        datasetCount += callsigns.size;
+        callsigns.forEach(cs => allCallsigns.add(cs));
+      } catch (err) {
+        console.error(`  ERROR fetching ${file}: ${err.message}`);
+      }
     }
+    console.log(`  Total from ${dataset}: ${datasetCount} (before dedup)`);
   }
 
   // Sort callsigns into categories
@@ -126,8 +135,8 @@ async function main() {
  * Auto-generated from vatSys datasets - DO NOT EDIT MANUALLY
  *
  * Sources:
- *   - https://github.com/vatSys/australia-dataset/blob/master/Positions.xml
- *   - https://github.com/vatSys/pacific-dataset/blob/master/Positions.xml
+ *   - https://github.com/vatSys/australia-dataset (Sectors.xml + Positions.xml)
+ *   - https://github.com/vatSys/pacific-dataset (Sectors.xml + Positions.xml)
  *
  * Last synced: ${timestamp}
  * Total callsigns: ${allCallsigns.size}
