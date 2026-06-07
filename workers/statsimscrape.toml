@@ -6,9 +6,11 @@ name = "statsimscrape"
 main = "../statsimworker.js"
 compatibility_date = "2026-01-11"
 preview_urls = false
+account_id = "baf002432f05611f72b33b7b2e5028f1"
 
 [vars]
 WORKER_URL = "https://statsimscrape.therealleviticus.workers.dev/"
+# STATSIM_API_KEY set via: wrangler secret put STATSIM_API_KEY -c workers/statsimscrape.toml
 
 [observability]
 enabled = true

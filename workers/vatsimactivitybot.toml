@@ -5,10 +5,13 @@
 name = "vatsimactivitybot"
 main = "../worker-complete.js"
 compatibility_date = "2024-01-01"
+account_id = "baf002432f05611f72b33b7b2e5028f1"
 
-# Daily cron trigger
+# Cron triggers:
+#   - Every 5 minutes: live rating/ATIS violation check
+#   - Daily at 06:00 UTC: full audit (handled by worker logic)
 [triggers]
-crons = ["0 12 * * *"]
+crons = ["*/5 * * * *"]
 
 # KV Namespace bindings
 # Replace <KV_NAMESPACE_ID> with your actual vatpac-audits namespace ID
@@ -20,3 +23,6 @@ id = "eed282e8c3c54680981aa1e60520eaf6"
 [[kv_namespaces]]
 binding = "sessions"
 id = "eed282e8c3c54680981aa1e60520eaf6"
+
+[vars]
+# DISCORD_WEBHOOK_URL set via: wrangler secret put DISCORD_WEBHOOK_URL -c workers/vatsimactivitybot.toml
