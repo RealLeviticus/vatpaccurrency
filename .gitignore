@@ -1,6 +1,5 @@
 .gitignore
 .claude/
 .vscode/
-worker-complete.js
 kv-reader.js
 statsimworker.js
