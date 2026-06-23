@@ -44,7 +44,7 @@ const MAX_RETRIES = 2;                   // Reduced retries to save subrequests
 const TMS_CACHE_TTL_MS = 5 * 60 * 1000;  // TMS cache TTL (5 minutes)
 
 // Discord notification
-const DISCORD_USER_ID = '191805273864667137';
+const DISCORD_ROLE_ID = '1447275288152248360';
 
 // VATSIM rating numeric IDs
 const RATING_MAP = {
@@ -1142,7 +1142,7 @@ async function sendDiscordAuditAlert(env, store) {
   }
 
   const body = {
-    content: `<@${DISCORD_USER_ID}> Daily audit completed with flagged controllers.`,
+    content: `<@&${DISCORD_ROLE_ID}> Daily audit completed with flagged controllers.`,
     embeds: [embed]
   };
 
@@ -1346,7 +1346,7 @@ async function sendLiveViolationAlert(env, ratingViolations, atisViolations, end
   }
 
   const body = {
-    content: `<@${DISCORD_USER_ID}> Live controller violations detected!`,
+    content: `<@&${DISCORD_ROLE_ID}> Live controller violations detected!`,
     embeds: [embed]
   };
 
