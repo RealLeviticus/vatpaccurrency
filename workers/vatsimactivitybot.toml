@@ -11,7 +11,7 @@ account_id = "baf002432f05611f72b33b7b2e5028f1"
 #   - Every 5 minutes: live rating/ATIS violation check
 #   - Daily at 06:00 UTC: full audit (handled by worker logic)
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["* * * * *"]
 
 # KV Namespace bindings
 # Replace <KV_NAMESPACE_ID> with your actual vatpac-audits namespace ID
