@@ -52,6 +52,10 @@ const RATING_MAP = {
   7: 'C3', 8: 'I1', 10: 'I3', 11: 'SUP', 12: 'ADM'
 };
 
+const ACTIVE_ENDORSEMENT_STATUS = 2;
+const SOLO_ENDORSEMENT_STATUS = 1;
+const ENR_SOLO_ENDORSEMENT_SKU = 'enr';
+
 // Minimum rating required for each position suffix
 function getMinRatingForPosition(callsign) {
   const cs = callsign.toUpperCase();
@@ -60,6 +64,28 @@ function getMinRatingForPosition(callsign) {
   if (cs.endsWith('_APP') || cs.endsWith('_DEP')) return 4; // S3
   if (cs.endsWith('_CTR') || cs.endsWith('_FSS') || cs.endsWith('_FMP')) return 5; // C1
   return 1; // OBS
+}
+
+function isEnroutePosition(callsign) {
+  const cs = String(callsign || '').toUpperCase();
+  return cs.endsWith('_CTR') || cs.endsWith('_FSS');
+}
+
+function hasValidEnrSoloEndorsement(endorsementsByCid, cid, callsign, now = Date.now()) {
+  const normalizedCallsign = String(callsign || '').toUpperCase();
+  if (!isEnroutePosition(normalizedCallsign)) return false;
+
+  const endorsements = endorsementsByCid.get(String(cid)) || [];
+  return endorsements.some(endorsement => {
+    const sku = String(endorsement?.sku || '').toLowerCase();
+    const status = Number(endorsement?.status);
+    const expiresAt = Date.parse(endorsement?.expires || '');
+
+    return sku === ENR_SOLO_ENDORSEMENT_SKU
+      && status === SOLO_ENDORSEMENT_STATUS
+      && Number.isFinite(expiresAt)
+      && expiresAt > now;
+  });
 }
 
 // Cooldown per violation to avoid Discord spam (1 hour)
@@ -414,21 +440,38 @@ async function getTMSList(scope = "visiting") {
   return usersWithRating;
 }
 
-// Returns Map<cid, Set<sku>> of active (status 2) endorsements for all TMS users
-async function getTMSEndorsementMap() {
-  // Populate cache if stale/empty (piggybacks on existing getTMSList cache)
+async function ensureTMSCache() {
   if (!TMS_CACHE || (Date.now() - TMS_CACHE_TS) >= TMS_CACHE_TTL_MS) {
     await getTMSList('local');
   }
+}
+
+// Returns Map<cid, Set<sku>> of full active (status 2) endorsements for all TMS users
+async function getTMSEndorsementMap() {
+  // Populate cache if stale/empty (piggybacks on existing getTMSList cache)
+  await ensureTMSCache();
   const map = new Map();
   if (!TMS_CACHE?.users) return map;
   for (const user of TMS_CACHE.users) {
     const cid = String(user.cid || '');
     if (!cid) continue;
     const active = new Set(
-      (user.endorsements || []).filter(e => e.status === 2).map(e => e.sku)
+      (user.endorsements || []).filter(e => Number(e.status) === ACTIVE_ENDORSEMENT_STATUS).map(e => e.sku)
     );
     map.set(cid, active);
+  }
+  return map;
+}
+
+// Returns Map<cid, endorsements[]> with raw TMS endorsement details, including solos.
+async function getTMSEndorsementsByCid() {
+  await ensureTMSCache();
+  const map = new Map();
+  if (!TMS_CACHE?.users) return map;
+  for (const user of TMS_CACHE.users) {
+    const cid = String(user.cid || '');
+    if (!cid) continue;
+    map.set(cid, Array.isArray(user.endorsements) ? user.endorsements : []);
   }
   return map;
 }
@@ -1177,7 +1220,7 @@ async function checkLiveVatsimData(env) {
     });
     if (!response.ok) {
       logger.error('Failed to fetch VATSIM data', null, { status: response.status });
-      return { ratingViolations: [], atisViolations: [] };
+      return { ratingViolations: [], atisViolations: [], endorsementViolations: [] };
     }
 
     const vatsimData = await response.json();
@@ -1190,10 +1233,12 @@ async function checkLiveVatsimData(env) {
 
     // Get endorsement map for all TMS users (reuses same cache)
     const endorsementMap = await getTMSEndorsementMap();
+    const endorsementsByCid = await getTMSEndorsementsByCid();
 
     const ratingViolations = [];
     const atisViolations = [];
     const endorsementViolations = [];
+    const now = Date.now();
 
     // Check each online controller on VATPAC positions
     for (const controller of controllers) {
@@ -1207,7 +1252,8 @@ async function checkLiveVatsimData(env) {
       // Rating check — local controllers only
       if (localCidSet.has(cid)) {
         const minRating = getMinRatingForPosition(callsign);
-        if (rating < minRating) {
+        const hasRatingSolo = hasValidEnrSoloEndorsement(endorsementsByCid, cid, callsign, now);
+        if (rating < minRating && !hasRatingSolo) {
           ratingViolations.push({
             cid,
             callsign,
