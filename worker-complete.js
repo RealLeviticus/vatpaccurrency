@@ -1339,6 +1339,12 @@ async function checkLiveVatsimData(env) {
       }
 
       // Only flag S1 (2) and S2 (3)
+      // Exempt S2 controllers with a valid TMA solo on an approach position
+      if (controllerRating === 3 && onlineCtrl) {
+        const ctrlCallsign = String(onlineCtrl.callsign || '').toUpperCase();
+        if (hasValidTmaSoloEndorsement(endorsementsByCid, cid, ctrlCallsign, now)) continue;
+      }
+
       if (controllerRating === 2 || controllerRating === 3) {
         atisViolations.push({
           cid,
