@@ -82,10 +82,10 @@ function hasValidTmaSoloEndorsement(endorsementsByCid, cid, callsign, now = Date
   const endorsements = endorsementsByCid.get(String(cid)) || [];
   return endorsements.some(e => {
     const expiresAt = Date.parse(e?.expires || '');
+    const isExpired = Number.isFinite(expiresAt) && expiresAt <= now;
     return String(e?.sku || '').toLowerCase() === TMA_SOLO_ENDORSEMENT_SKU
       && Number(e?.status) === SOLO_ENDORSEMENT_STATUS
-      && Number.isFinite(expiresAt)
-      && expiresAt > now;
+      && !isExpired;
   });
 }
 
@@ -106,11 +106,11 @@ function hasValidEnrSoloEndorsement(endorsementsByCid, cid, callsign, now = Date
     const sku = String(endorsement?.sku || '').toLowerCase();
     const status = Number(endorsement?.status);
     const expiresAt = Date.parse(endorsement?.expires || '');
+    const isExpired = Number.isFinite(expiresAt) && expiresAt <= now;
 
     return sku === ENR_SOLO_ENDORSEMENT_SKU
       && status === SOLO_ENDORSEMENT_STATUS
-      && Number.isFinite(expiresAt)
-      && expiresAt > now;
+      && !isExpired;
   });
 }
 
