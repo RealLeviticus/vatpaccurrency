@@ -1264,7 +1264,6 @@ async function checkLiveVatsimData(env) {
     const ratingViolations = [];
     const atisViolations = [];
     const endorsementViolations = [];
-    const soloViolations = [];
     const now = Date.now();
 
     // Check each online controller on VATPAC positions
@@ -1289,21 +1288,6 @@ async function checkLiveVatsimData(env) {
             ratingShort: RATING_MAP[rating] || `R${rating}`,
             requiredRating: minRating,
             requiredRatingShort: RATING_MAP[minRating] || `R${minRating}`,
-            logonTime: controller.logon_time
-          });
-        }
-      }
-
-      // Solo approach check — TMS-known controllers on APP/DEP with solo but not full TMA endorsement
-      if (isApproachPosition(callsign) && endorsementsByCid.has(cid)) {
-        const hasSolo = hasValidTmaSoloEndorsement(endorsementsByCid, cid, callsign, now);
-        const hasFull = hasFullTmaEndorsement(endorsementsByCid, cid);
-        if (hasSolo && !hasFull) {
-          soloViolations.push({
-            cid,
-            callsign,
-            rating,
-            ratingShort: RATING_MAP[rating] || `R${rating}`,
             logonTime: controller.logon_time
           });
         }
@@ -1372,26 +1356,25 @@ async function checkLiveVatsimData(env) {
       vatpacOnline: controllers.filter(c => VATPAC_CALLSIGNS.has(String(c.callsign || '').toUpperCase())).length,
       ratingViolations: ratingViolations.length,
       atisViolations: atisViolations.length,
-      endorsementViolations: endorsementViolations.length,
-      soloViolations: soloViolations.length
+      endorsementViolations: endorsementViolations.length
     });
 
-    return { ratingViolations, atisViolations, endorsementViolations, soloViolations };
+    return { ratingViolations, atisViolations, endorsementViolations };
 
   } catch (err) {
     logger.error('Live VATSIM check failed', err);
-    return { ratingViolations: [], atisViolations: [], endorsementViolations: [], soloViolations: [] };
+    return { ratingViolations: [], atisViolations: [], endorsementViolations: [] };
   }
 }
 
-async function sendLiveViolationAlert(env, ratingViolations, atisViolations, endorsementViolations = [], soloViolations = []) {
+async function sendLiveViolationAlert(env, ratingViolations, atisViolations, endorsementViolations = []) {
   const webhookUrl = env.DISCORD_WEBHOOK_URL;
   if (!webhookUrl) {
     logger.warn('DISCORD_WEBHOOK_URL not configured — skipping live violation alert');
     return;
   }
 
-  if (ratingViolations.length === 0 && atisViolations.length === 0 && endorsementViolations.length === 0 && soloViolations.length === 0) return;
+  if (ratingViolations.length === 0 && atisViolations.length === 0 && endorsementViolations.length === 0) return;
 
   const embed = {
     title: '\u{1f6a8} Live Rating Violation Detected',
@@ -1435,17 +1418,6 @@ async function sendLiveViolationAlert(env, ratingViolations, atisViolations, end
     });
   }
 
-  if (soloViolations.length > 0) {
-    const lines = soloViolations.map(v =>
-      `\u2022 **${v.cid}** (${v.ratingShort}) on \`${v.callsign}\` \u2014 Solo endorsement only \u2014 ensure supervision`
-    );
-    embed.fields.push({
-      name: `\u{1f7e1} Solo Endorsement Online (${soloViolations.length})`,
-      value: lines.join('\n').slice(0, 1024),
-      inline: false
-    });
-  }
-
   const body = {
     content: `<@&${DISCORD_ROLE_ID}> Live controller violations detected!`,
     embeds: [embed]
@@ -1472,11 +1444,11 @@ async function sendLiveViolationAlert(env, ratingViolations, atisViolations, end
 }
 
 async function checkAndAlertLiveViolations(env) {
-  const { ratingViolations, atisViolations, endorsementViolations, soloViolations } = await checkLiveVatsimData(env);
+  const { ratingViolations, atisViolations, endorsementViolations } = await checkLiveVatsimData(env);
 
-  if (ratingViolations.length === 0 && atisViolations.length === 0 && endorsementViolations.length === 0 && soloViolations.length === 0) {
+  if (ratingViolations.length === 0 && atisViolations.length === 0 && endorsementViolations.length === 0) {
     logger.info('No live violations detected');
-    return { ratingViolations: 0, atisViolations: 0, endorsementViolations: 0, soloViolations: 0, newAlerts: 0, alerted: false };
+    return { ratingViolations: 0, atisViolations: 0, endorsementViolations: 0, newAlerts: 0, alerted: false };
   }
 
   // Load already-alerted violations from KV to avoid spamming
@@ -1503,19 +1475,13 @@ async function checkAndAlertLiveViolations(env) {
     return !alerted[key] || (now - alerted[key] > LIVE_CHECK_ALERT_COOLDOWN_MS);
   });
 
-  const newSoloViolations = soloViolations.filter(v => {
-    const key = `solo_${v.cid}_${v.callsign}`;
-    return !alerted[key] || (now - alerted[key] > LIVE_CHECK_ALERT_COOLDOWN_MS);
-  });
-
-  if (newRatingViolations.length > 0 || newAtisViolations.length > 0 || newEndorsementViolations.length > 0 || newSoloViolations.length > 0) {
-    await sendLiveViolationAlert(env, newRatingViolations, newAtisViolations, newEndorsementViolations, newSoloViolations);
+  if (newRatingViolations.length > 0 || newAtisViolations.length > 0 || newEndorsementViolations.length > 0) {
+    await sendLiveViolationAlert(env, newRatingViolations, newAtisViolations, newEndorsementViolations);
 
     // Mark as alerted
     for (const v of newRatingViolations) alerted[`rating_${v.cid}_${v.callsign}`] = now;
     for (const v of newAtisViolations) alerted[`atis_${v.cid}`] = now;
     for (const v of newEndorsementViolations) alerted[`endorse_${v.cid}_${v.callsign}`] = now;
-    for (const v of newSoloViolations) alerted[`solo_${v.cid}_${v.callsign}`] = now;
 
     // Prune entries older than 24 hours
     for (const [key, ts] of Object.entries(alerted)) {
@@ -1529,9 +1495,8 @@ async function checkAndAlertLiveViolations(env) {
     ratingViolations: ratingViolations.length,
     atisViolations: atisViolations.length,
     endorsementViolations: endorsementViolations.length,
-    soloViolations: soloViolations.length,
-    newAlerts: newRatingViolations.length + newAtisViolations.length + newEndorsementViolations.length + newSoloViolations.length,
-    alerted: newRatingViolations.length > 0 || newAtisViolations.length > 0 || newEndorsementViolations.length > 0 || newSoloViolations.length > 0
+    newAlerts: newRatingViolations.length + newAtisViolations.length + newEndorsementViolations.length,
+    alerted: newRatingViolations.length > 0 || newAtisViolations.length > 0 || newEndorsementViolations.length > 0
   };
 }
 
