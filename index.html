@@ -10,7 +10,7 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src https://kv-reader.therealleviticus.workers.dev https://vatsimactivitybot.therealleviticus.workers.dev; style-src 'self' 'unsafe-inline'; script-src 'self';">
   <meta name="color-scheme" content="dark">
   <title>VATPAC Controller Audits</title>
-  <link rel="stylesheet" href="css/style.css?v=5">
+  <link rel="stylesheet" href="css/style.css?v=6">
 </head>
 <body>
   <!-- Navigation -->
@@ -59,11 +59,12 @@
               <th data-sort="status">Status</th>
               <th data-sort="hours">Hours</th>
               <th data-sort="lastControlled">Last Controlled</th>
+              <th>Alerts</th>
             </tr>
           </thead>
           <tbody id="visitingTableBody">
             <tr>
-              <td colspan="5" style="text-align: center;">
+              <td colspan="6" style="text-align: center;">
                 <div class="empty-state">
                   <div class="empty-state-icon">⏳</div>
                   <p>Loading audit data...</p>
@@ -113,11 +114,12 @@
               <th data-sort="status">Status</th>
               <th data-sort="hours">Hours</th>
               <th data-sort="lastControlled">Last Controlled</th>
+              <th>Alerts</th>
             </tr>
           </thead>
           <tbody id="localTableBody">
             <tr>
-              <td colspan="5" style="text-align: center;">
+              <td colspan="6" style="text-align: center;">
                 <div class="empty-state">
                   <div class="empty-state-icon">⏳</div>
                   <p>Loading audit data...</p>
@@ -137,6 +139,6 @@
   </main>
 
   <!-- JavaScript Modules -->
-  <script type="module" src="js/audit.js?v=4"></script>
+  <script type="module" src="js/audit.js?v=5"></script>
 </body>
 </html>
