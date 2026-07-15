@@ -3,7 +3,10 @@
  * Display visiting and local controller audit results
  */
 
-import api from './api.js';
+// Version queries keep module imports in lockstep with the audit.js?v=N
+// cache-bust in index.html — without them the browser can pair a fresh
+// audit.js with a stale cached api.js/utils.js.
+import api from './api.js?v=6';
 import {
   formatDate,
   formatDuration,
@@ -15,7 +18,7 @@ import {
   hideLoading,
   debounce,
   escapeHTML
-} from './utils.js';
+} from './utils.js?v=6';
 
 let visitingData = [];
 let localData = [];
