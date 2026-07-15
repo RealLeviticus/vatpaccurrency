@@ -131,6 +131,39 @@ class WatchlistAPI {
     });
   }
 
+  // ==================== Alert Exclusion Endpoints ====================
+
+  /**
+   * Get controllers excluded from live-check webhook alerts
+   * @returns {Promise<{exclusions: Array<{cid: string, addedAt: string}>}>}
+   */
+  async getExclusions() {
+    return this.request('/exclusions');
+  }
+
+  /**
+   * Exclude a controller from live-check webhook alerts
+   * @param {string|number} cid - Controller CID
+   * @returns {Promise<{success: boolean, cid: string}>}
+   */
+  async addExclusion(cid) {
+    return this.request('/exclusions', {
+      method: 'POST',
+      body: JSON.stringify({ cid: String(cid) })
+    });
+  }
+
+  /**
+   * Re-include a controller in live-check webhook alerts
+   * @param {string|number} cid - Controller CID
+   * @returns {Promise<{success: boolean, cid: string}>}
+   */
+  async removeExclusion(cid) {
+    return this.request(`/exclusions/${cid}`, {
+      method: 'DELETE'
+    });
+  }
+
   // ==================== Presence Endpoints ====================
 
   /**
