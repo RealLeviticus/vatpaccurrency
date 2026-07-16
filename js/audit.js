@@ -6,7 +6,7 @@
 // Version queries keep module imports in lockstep with the audit.js?v=N
 // cache-bust in index.html — without them the browser can pair a fresh
 // audit.js with a stale cached api.js/utils.js.
-import api from './api.js?v=6';
+import api from './api.js?v=7';
 import {
   formatDate,
   formatDuration,
@@ -18,11 +18,11 @@ import {
   hideLoading,
   debounce,
   escapeHTML
-} from './utils.js?v=6';
+} from './utils.js?v=7';
 
 let visitingData = [];
 let localData = [];
-// CIDs excluded from live-check webhook alerts
+// CIDs muted from under-hours audit alerts
 let excludedCids = new Set();
 let currentTab = 'visiting';
 const ITEMS_PER_PAGE = 25;
@@ -282,7 +282,7 @@ function renderAuditTable(type) {
             class="exclude-toggle${isExcluded ? ' excluded' : ''}"
             data-cid="${cid}"
             aria-pressed="${isExcluded}"
-            title="${isExcluded ? 'Excluded from webhook alerts — click to re-enable' : 'Click to exclude from webhook alerts'}"
+            title="${isExcluded ? 'Muted from under-hours alerts — click to re-enable (live checks still apply)' : 'Click to mute under-hours alerts (live checks still apply)'}"
           >${isExcluded ? '🔕 Muted' : '🔔 Alerts On'}</button>`
       : '';
 
@@ -398,7 +398,7 @@ function setupPagination(type) {
 // ==================== Alert Exclusions ====================
 
 /**
- * Toggle a controller's exclusion from live-check webhook alerts
+ * Toggle a controller's mute for under-hours audit alerts
  * @param {string} cid - Controller CID
  * @param {HTMLButtonElement} button - The clicked toggle button
  */
@@ -410,11 +410,11 @@ async function toggleExclusion(cid, button) {
     if (isExcluded) {
       await api.removeExclusion(cid);
       excludedCids.delete(cid);
-      showSuccess(`${cid} will receive webhook alerts again`);
+      showSuccess(`${cid} will receive under-hours alerts again`);
     } else {
       await api.addExclusion(cid);
       excludedCids.add(cid);
-      showSuccess(`${cid} excluded from webhook alerts`);
+      showSuccess(`${cid} muted from under-hours alerts`);
     }
   } catch (error) {
     console.error('Failed to update exclusion:', error);
