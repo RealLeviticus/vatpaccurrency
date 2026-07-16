@@ -134,7 +134,7 @@ class WatchlistAPI {
   // ==================== Alert Exclusion Endpoints ====================
 
   /**
-   * Get controllers excluded from live-check webhook alerts
+   * Get controllers muted from under-hours audit alerts
    * @returns {Promise<{exclusions: Array<{cid: string, addedAt: string}>}>}
    */
   async getExclusions() {
@@ -142,7 +142,7 @@ class WatchlistAPI {
   }
 
   /**
-   * Exclude a controller from live-check webhook alerts
+   * Mute a controller's under-hours audit alerts
    * @param {string|number} cid - Controller CID
    * @returns {Promise<{success: boolean, cid: string}>}
    */
@@ -154,7 +154,7 @@ class WatchlistAPI {
   }
 
   /**
-   * Re-include a controller in live-check webhook alerts
+   * Unmute a controller's under-hours audit alerts
    * @param {string|number} cid - Controller CID
    * @returns {Promise<{success: boolean, cid: string}>}
    */

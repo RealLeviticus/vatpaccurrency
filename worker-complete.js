@@ -117,7 +117,8 @@ function hasValidEnrSoloEndorsement(endorsementsByCid, cid, callsign, now = Date
 // Cooldown per violation to avoid Discord spam (1 hour)
 const LIVE_CHECK_ALERT_COOLDOWN_MS = 60 * 60 * 1000;
 
-// KV key for controllers excluded from live-check webhook alerts
+// KV key for controllers muted from under-hours audit alerts
+// (key name kept for backwards compatibility with stored data)
 const EXCLUSIONS_KV_KEY = 'live_check_exclusions';
 
 // Positions requiring the Sydney Complex (sydTcu) endorsement
@@ -326,7 +327,7 @@ async function handleAPI(request, env) {
       return jsonResponse(result, 200, env, request);
     }
 
-    // GET /api/exclusions - list CIDs excluded from live-check alerts
+    // GET /api/exclusions - list CIDs muted from under-hours audit alerts
     if (path === '/api/exclusions' && method === 'GET') {
       const exclusions = await loadExclusions(env);
       return jsonResponse({
@@ -334,7 +335,7 @@ async function handleAPI(request, env) {
       }, 200, env, request);
     }
 
-    // POST /api/exclusions - exclude a CID from live-check alerts
+    // POST /api/exclusions - mute a CID's under-hours audit alerts
     if (path === '/api/exclusions' && method === 'POST') {
       const body = await request.json().catch(() => ({}));
       const cid = String(body.cid || '').trim();
@@ -344,11 +345,11 @@ async function handleAPI(request, env) {
       const exclusions = await loadExclusions(env);
       exclusions[cid] = { addedAt: new Date().toISOString() };
       await saveExclusions(env, exclusions);
-      logger.info('CID excluded from live-check alerts', { cid });
+      logger.info('CID muted from under-hours audit alerts', { cid });
       return jsonResponse({ success: true, cid }, 200, env, request);
     }
 
-    // DELETE /api/exclusions/:cid - re-include a CID in live-check alerts
+    // DELETE /api/exclusions/:cid - unmute a CID's under-hours audit alerts
     if (path.startsWith('/api/exclusions/') && method === 'DELETE') {
       const cid = path.replace('/api/exclusions/', '').trim();
       const exclusions = await loadExclusions(env);
@@ -357,7 +358,7 @@ async function handleAPI(request, env) {
       }
       delete exclusions[cid];
       await saveExclusions(env, exclusions);
-      logger.info('CID re-included in live-check alerts', { cid });
+      logger.info('CID unmuted for under-hours audit alerts', { cid });
       return jsonResponse({ success: true, cid }, 200, env, request);
     }
 
@@ -1219,8 +1220,10 @@ async function sendDiscordAuditAlert(env, store) {
     return;
   }
 
+  // Muted controllers are skipped for under-hours pings only
+  const excludedCids = new Set(Object.keys(await loadExclusions(env)));
   const visitingFlagged = (store.visiting || []).filter(
-    r => r.status === 'flagged'
+    r => r.status === 'flagged' && !excludedCids.has(r.id.replace('audit_', ''))
   );
   const localNonDivision = (store.local || []).filter(
     r => r.status === 'not-division-member'
@@ -1319,9 +1322,6 @@ async function checkLiveVatsimData(env) {
     const endorsementMap = await getTMSEndorsementMap();
     const endorsementsByCid = await getTMSEndorsementsByCid();
 
-    // Controllers manually excluded from checks via the site
-    const excludedCids = new Set(Object.keys(await loadExclusions(env)));
-
     const ratingViolations = [];
     const atisViolations = [];
     const endorsementViolations = [];
@@ -1335,9 +1335,6 @@ async function checkLiveVatsimData(env) {
 
       // Only check VATPAC positions
       if (!VATPAC_CALLSIGNS.has(callsign)) continue;
-
-      // Skip controllers excluded from checks
-      if (excludedCids.has(cid)) continue;
 
       // Rating check — local controllers only
       if (localCidSet.has(cid)) {
@@ -1382,7 +1379,6 @@ async function checkLiveVatsimData(env) {
 
       if (!callsign.endsWith('_ATIS')) continue;
       if (!localCidSet.has(cid)) continue;
-      if (excludedCids.has(cid)) continue;
 
       atisCountByCid.set(cid, (atisCountByCid.get(cid) || 0) + 1);
       if (!atisByController.has(cid)) atisByController.set(cid, []);
@@ -1427,8 +1423,7 @@ async function checkLiveVatsimData(env) {
       vatpacOnline: controllers.filter(c => VATPAC_CALLSIGNS.has(String(c.callsign || '').toUpperCase())).length,
       ratingViolations: ratingViolations.length,
       atisViolations: atisViolations.length,
-      endorsementViolations: endorsementViolations.length,
-      excludedCids: excludedCids.size
+      endorsementViolations: endorsementViolations.length
     });
 
     return { ratingViolations, atisViolations, endorsementViolations };
