@@ -6,7 +6,7 @@
  *   - https://github.com/vatSys/australia-dataset (Sectors.xml + Positions.xml)
  *   - https://github.com/vatSys/pacific-dataset (Sectors.xml + Positions.xml)
  *
- * Last synced: 2026-07-19T08:24:28.612Z
+ * Last synced: 2026-07-20T09:21:21.953Z
  * Total callsigns: 279
  *
  * To update, run: node scripts/sync-positions.js
@@ -35,14 +35,14 @@ const AERODROME = [
 
 // Approach/Departure positions (APP/DEP)
 const APPROACH = [
-  'AD-W_APP', 'AD_APP', 'AMB_APP', 'AV_APP', 'AYNZ_APP', 'AYPY_APP', 'BA_APP', 'BK_APP',
-  'BN-C_APP', 'BN-F_APP', 'BN-S_APP', 'BN_APP', 'CB-W_APP', 'CB_APP', 'CIN_APP', 'CS-W_APP',
-  'CS_APP', 'DN-W_APP', 'DN_APP', 'ES_APP', 'HB_APP', 'LM_APP', 'LT_APP', 'MK_APP',
-  'ML_APP', 'NFFN_APP', 'NFNA_APP', 'NVVV_APP', 'NWWM_APP', 'NWWW_APP', 'NW_APP', 'OK_APP',
-  'PE_APP', 'PH_APP', 'RI_APP', 'RK_APP', 'SG_APP', 'SY-DE_APP', 'SY-D_APP', 'SY-N_APP',
-  'SY_APP', 'TL_APP', 'TN_APP', 'WLM-H_APP', 'WLM_APP', 'WS_APP', 'AD-R_DEP', 'BN-R_DEP',
-  'BN-S_DEP', 'BN_DEP', 'ML-R_DEP', 'ML-S_DEP', 'ML_DEP', 'PH-R_DEP', 'PH_DEP', 'SY-N_DEP',
-  'SY-R_DEP', 'SY_DEP'
+  'AD-R_APP', 'AD-W_APP', 'AD_APP', 'AMB_APP', 'AV_APP', 'AYNZ_APP', 'AYPY_APP', 'BA_APP',
+  'BK_APP', 'BN-C_APP', 'BN-F_APP', 'BN-R_APP', 'BN-S_APP', 'BN_APP', 'CB-W_APP', 'CB_APP',
+  'CIN_APP', 'CS-W_APP', 'CS_APP', 'DN-W_APP', 'DN_APP', 'ES_APP', 'HB_APP', 'LM_APP',
+  'LT_APP', 'MK_APP', 'ML-R_APP', 'ML_APP', 'NFFN_APP', 'NFNA_APP', 'NVVV_APP', 'NWWM_APP',
+  'NWWW_APP', 'NW_APP', 'OK_APP', 'PE_APP', 'PH-R_APP', 'PH_APP', 'RI_APP', 'RK_APP',
+  'SG_APP', 'SY-DE_APP', 'SY-D_APP', 'SY-N_APP', 'SY-R_APP', 'SY_APP', 'TL_APP', 'TN_APP',
+  'WLM-H_APP', 'WLM_APP', 'WS_APP', 'BN-S_DEP', 'BN_DEP', 'ML-S_DEP', 'ML_DEP', 'PH_DEP',
+  'SY-N_DEP', 'SY_DEP'
 ];
 
 // Enroute positions (CTR/FSS)
