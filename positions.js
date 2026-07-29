@@ -6,7 +6,7 @@
  *   - https://github.com/vatSys/australia-dataset (Sectors.xml + Positions.xml)
  *   - https://github.com/vatSys/pacific-dataset (Sectors.xml + Positions.xml)
  *
- * Last synced: 2026-07-28T08:40:19.684Z
+ * Last synced: 2026-07-29T08:46:04.539Z
  * Total callsigns: 279
  *
  * To update, run: node scripts/sync-positions.js
