@@ -97,6 +97,17 @@ function hasFullTmaEndorsement(endorsementsByCid, cid) {
   );
 }
 
+// Matches a standalone "OTS" token in controller info (over-the-shoulder check).
+// Deliberately strict: won't match inside words like PILOTS, SLOTS or ROTS.
+const OTS_MARKER_PATTERN = /(?:^|[^A-Z0-9])OTS(?:[^A-Z0-9]|$)/;
+
+// Controllers running an OTS are supervised, so the rating requirement is waived
+function hasOtsInControllerInfo(controller) {
+  const info = controller?.text_atis;
+  const lines = Array.isArray(info) ? info : (typeof info === 'string' ? [info] : []);
+  return lines.some(line => OTS_MARKER_PATTERN.test(String(line || '').toUpperCase()));
+}
+
 function hasValidEnrSoloEndorsement(endorsementsByCid, cid, callsign, now = Date.now()) {
   const normalizedCallsign = String(callsign || '').toUpperCase();
   if (!isEnroutePosition(normalizedCallsign)) return false;
@@ -1326,6 +1337,7 @@ async function checkLiveVatsimData(env) {
     const atisViolations = [];
     const endorsementViolations = [];
     const now = Date.now();
+    let otsExempt = 0;
 
     // Check each online controller on VATPAC positions
     for (const controller of controllers) {
@@ -1341,7 +1353,12 @@ async function checkLiveVatsimData(env) {
         const minRating = getMinRatingForPosition(callsign);
         const hasEnrSolo = hasValidEnrSoloEndorsement(endorsementsByCid, cid, callsign, now);
         const hasTmaSolo = hasValidTmaSoloEndorsement(endorsementsByCid, cid, callsign, now);
-        if (rating < minRating && !hasEnrSolo && !hasTmaSolo) {
+        const isOts = hasOtsInControllerInfo(controller);
+        if (rating < minRating && isOts) {
+          otsExempt++;
+          logger.info('Rating violation skipped — OTS in controller info', { cid, callsign });
+        }
+        if (rating < minRating && !hasEnrSolo && !hasTmaSolo && !isOts) {
           ratingViolations.push({
             cid,
             callsign,
@@ -1423,7 +1440,8 @@ async function checkLiveVatsimData(env) {
       vatpacOnline: controllers.filter(c => VATPAC_CALLSIGNS.has(String(c.callsign || '').toUpperCase())).length,
       ratingViolations: ratingViolations.length,
       atisViolations: atisViolations.length,
-      endorsementViolations: endorsementViolations.length
+      endorsementViolations: endorsementViolations.length,
+      otsExempt
     });
 
     return { ratingViolations, atisViolations, endorsementViolations };
