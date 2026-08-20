@@ -19,6 +19,9 @@ const fs = require('fs');
 const path = require('path');
 
 const DATASETS = ['australia-dataset', 'pacific-dataset'];
+// Sanity floor: the real list sits near 280. Far below this means the upstream XML
+// changed shape and the parse silently produced almost nothing.
+const MIN_EXPECTED_CALLSIGNS = 200;
 const BASE_URL = 'https://raw.githubusercontent.com/vatSys';
 const FILES = ['Sectors.xml', 'Positions.xml'];
 
@@ -84,6 +87,7 @@ async function main() {
   console.log('Syncing VATPAC positions from vatSys GitHub datasets...\n');
 
   const allCallsigns = new Set();
+  const failures = [];
 
   for (const dataset of DATASETS) {
     console.log(`Fetching ${dataset}...`);
@@ -101,9 +105,28 @@ async function main() {
         callsigns.forEach(cs => allCallsigns.add(cs));
       } catch (err) {
         console.error(`  ERROR fetching ${file}: ${err.message}`);
+        failures.push(`${dataset}/${file}: ${err.message}`);
       }
     }
     console.log(`  Total from ${dataset}: ${datasetCount} (before dedup)`);
+  }
+
+  // A partial fetch must never be published: the workers treat this list as the
+  // definitive set of VATPAC positions, so a truncated file silently disables
+  // every rating and endorsement check for the callsigns that went missing.
+  if (failures.length > 0) {
+    console.error(`
+Aborting — ${failures.length} source file(s) failed to fetch:`);
+    failures.forEach(f => console.error(`  - ${f}`));
+    console.error('positions.js left unchanged.');
+    process.exit(1);
+  }
+
+  if (allCallsigns.size < MIN_EXPECTED_CALLSIGNS) {
+    console.error(`
+Aborting — only ${allCallsigns.size} callsigns found, expected at least ${MIN_EXPECTED_CALLSIGNS}.`);
+    console.error('Likely an upstream format change. positions.js left unchanged.');
+    process.exit(1);
   }
 
   // Sort callsigns into categories
@@ -138,7 +161,7 @@ async function main() {
  *   - https://github.com/vatSys/australia-dataset (Sectors.xml + Positions.xml)
  *   - https://github.com/vatSys/pacific-dataset (Sectors.xml + Positions.xml)
  *
- * Last synced: ${timestamp}
+ * Last updated: ${timestamp}
  * Total callsigns: ${allCallsigns.size}
  *
  * To update, run: node scripts/sync-positions.js
@@ -183,6 +206,21 @@ export const PAC_CALLSIGNS = [...VATPAC_CALLSIGNS];
 `;
 
   const outPath = path.join(__dirname, '..', 'positions.js');
+
+  // Compare everything except the generated timestamp. Without this the file
+  // changed on every run, so CI committed a "chore: sync" every single day even
+  // when the callsign list was byte-identical.
+  const stripTimestamp = text => text.replace(/^ \* Last (?:synced|updated):.*$/m, '');
+  let existing = null;
+  try {
+    existing = fs.readFileSync(outPath, 'utf8');
+  } catch { /* first run - file does not exist yet */ }
+
+  if (existing !== null && stripTimestamp(existing) === stripTimestamp(output)) {
+    console.log('\nNo callsign changes — positions.js left untouched.');
+    return;
+  }
+
   fs.writeFileSync(outPath, output, 'utf8');
   console.log(`\nWrote ${outPath}`);
 }
