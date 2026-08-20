@@ -1,5 +1,3 @@
 .gitignore
 .claude/
 .vscode/
-kv-reader.js
-statsimworker.js

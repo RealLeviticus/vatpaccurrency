@@ -41,6 +41,8 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
-          npx wrangler deploy -c workers/kv-reader.toml
-          npx wrangler deploy -c workers/vatsimactivitybot.toml
-          npx wrangler deploy -c workers/statsimscrape.toml
+          # Alerting worker first: it consumes positions.js, so a failure in either of
+          # the other two must not stop it from picking up the fresh callsigns.
+          npx wrangler@4 deploy -c workers/vatsimactivitybot.toml
+          npx wrangler@4 deploy -c workers/kv-reader.toml
+          npx wrangler@4 deploy -c workers/statsimscrape.toml
