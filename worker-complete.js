@@ -522,6 +522,10 @@ async function handleAPI(request, env) {
 let TMS_CACHE = null;
 let TMS_CACHE_TS = 0;
 
+// Below this many roster entries we refuse to conclude that anyone is "absent"
+// from it — a short read would otherwise flag every controller online.
+const MIN_ROSTER_SIZE_FOR_ABSENCE_CHECK = 400;
+
 const TMS_KV_CACHE_KEY = 'tms_users_cache';
 const TMS_FAILURE_KEY = 'tms_failure_until';
 // After a TMS error, stop asking for this long. VATPAC run this service themselves;
@@ -1474,7 +1478,7 @@ async function checkLiveVatsimData(env) {
     });
     if (!response.ok) {
       logger.error('Failed to fetch VATSIM data', null, { status: response.status });
-      return { ratingViolations: [], atisViolations: [], endorsementViolations: [], skipped: true, reason: `VATSIM data fetch failed (HTTP ${response.status})` };
+      return { ratingViolations: [], atisViolations: [], endorsementViolations: [], rosterViolations: [], skipped: true, reason: `VATSIM data fetch failed (HTTP ${response.status})` };
     }
 
     const vatsimData = await response.json();
@@ -1492,6 +1496,18 @@ async function checkLiveVatsimData(env) {
     const ratingViolations = [];
     const atisViolations = [];
     const endorsementViolations = [];
+    const rosterViolations = [];
+
+    // Suspension presents as removal from the TMS roster rather than as a
+    // downgraded endorsement status, so someone controlling a VATPAC position
+    // while absent from the roster is the strongest signal available.
+    const rosterTrustworthy = endorsementMap.size >= MIN_ROSTER_SIZE_FOR_ABSENCE_CHECK;
+    if (!rosterTrustworthy) {
+      logger.warn('TMS roster too small to trust absence checks — skipping them', {
+        rosterSize: endorsementMap.size,
+        required: MIN_ROSTER_SIZE_FOR_ABSENCE_CHECK
+      });
+    }
     const now = Date.now();
     let otsExempt = 0;
 
@@ -1529,6 +1545,19 @@ async function checkLiveVatsimData(env) {
             logonTime: controller.logon_time
           });
         }
+      }
+
+      // Not on the VATPAC roster at all. Deliberately not waived by an OTS:
+      // if someone has been removed from the roster, a supervised session is
+      // not a reason to stay quiet about it.
+      if (rosterTrustworthy && !endorsementMap.has(cid)) {
+        rosterViolations.push({
+          cid,
+          callsign,
+          rating,
+          ratingShort: RATING_MAP[rating] || `R${rating}`,
+          logonTime: controller.logon_time
+        });
       }
 
       // Endorsement checks — local controllers only. Visiting controllers are
@@ -1634,16 +1663,17 @@ async function checkLiveVatsimData(env) {
       ratingViolations: ratingViolations.length,
       atisViolations: atisViolations.length,
       endorsementViolations: endorsementViolations.length,
+      rosterViolations: rosterViolations.length,
       otsExempt
     });
 
-    return { ratingViolations, atisViolations, endorsementViolations };
+    return { ratingViolations, atisViolations, endorsementViolations, rosterViolations };
 
   } catch (err) {
     // An upstream outage must not be reported as "no violations found" — that is
     // exactly how a missed alert looks in the logs.
     logger.error('Live VATSIM check failed — results are NOT a clean bill of health', err);
-    return { ratingViolations: [], atisViolations: [], endorsementViolations: [], skipped: true, reason: err?.message || String(err) };
+    return { ratingViolations: [], atisViolations: [], endorsementViolations: [], rosterViolations: [], skipped: true, reason: err?.message || String(err) };
   }
 }
 
@@ -1689,20 +1719,22 @@ function chunkIntoFields(name, lines) {
   return fields;
 }
 
-async function sendLiveViolationAlert(env, ratingViolations, atisViolations, endorsementViolations = []) {
+async function sendLiveViolationAlert(env, ratingViolations, atisViolations, endorsementViolations = [], rosterViolations = []) {
   const webhookUrl = env.DISCORD_WEBHOOK_URL;
   if (!webhookUrl) {
     logger.warn('DISCORD_WEBHOOK_URL not configured — skipping live violation alert');
     return;
   }
 
-  const totalIssues = ratingViolations.length + atisViolations.length + endorsementViolations.length;
+  const totalIssues = ratingViolations.length + atisViolations.length
+    + endorsementViolations.length + rosterViolations.length;
   if (totalIssues === 0) return;
 
   const affectedCids = new Set([
     ...ratingViolations.map(v => v.cid),
     ...atisViolations.map(v => v.cid),
-    ...endorsementViolations.map(v => v.cid)
+    ...endorsementViolations.map(v => v.cid),
+    ...rosterViolations.map(v => v.cid)
   ]);
 
   const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -1719,7 +1751,23 @@ async function sendLiveViolationAlert(env, ratingViolations, atisViolations, end
     footer: { text: 'VATPAC Controller Audit • Live Check' }
   };
 
-  // Endorsement issues lead: a suspended endorsement is the most actionable finding.
+  // Roster absence leads: it is the strongest signal and usually means the
+  // member was suspended or removed rather than merely under-endorsed.
+  if (rosterViolations.length > 0) {
+    const lines = rosterViolations.map(v => {
+      const parts = [
+        `• **${tick}${v.callsign}${tick}** — [${v.cid}](${vatsimStatsUrl(v.cid)})`,
+        'Not on the VATPAC roster'
+      ];
+      if (v.ratingShort) parts.push(`Rating **${v.ratingShort}**`);
+      const on = discordRelativeTime(v.logonTime);
+      if (on) parts.push(`Online since ${on}`);
+      return parts.join(' · ');
+    });
+    embed.fields.push(...chunkIntoFields(`\u{1f6d1} Not On Roster (${rosterViolations.length})`, lines));
+  }
+
+  // Endorsement issues next: a suspended endorsement is the most actionable finding.
   if (endorsementViolations.length > 0) {
     const lines = endorsementViolations.map(v => {
       const parts = [
@@ -1790,7 +1838,8 @@ async function sendLiveViolationAlert(env, ratingViolations, atisViolations, end
       logger.info('Live violation Discord notification sent', {
         ratingViolations: ratingViolations.length,
         atisViolations: atisViolations.length,
-        endorsementViolations: endorsementViolations.length
+        endorsementViolations: endorsementViolations.length,
+        rosterViolations: rosterViolations.length
       });
     }
   } catch (err) {
@@ -1799,16 +1848,17 @@ async function sendLiveViolationAlert(env, ratingViolations, atisViolations, end
 }
 
 async function checkAndAlertLiveViolations(env) {
-  const { ratingViolations, atisViolations, endorsementViolations, skipped, reason } = await checkLiveVatsimData(env);
+  const { ratingViolations, atisViolations, endorsementViolations, rosterViolations = [], skipped, reason } = await checkLiveVatsimData(env);
 
   if (skipped) {
     logger.error('Live violation check could not run — upstream data unavailable', null, { reason });
     return { skipped: true, reason, ratingViolations: 0, atisViolations: 0, endorsementViolations: 0, newAlerts: 0, alerted: false };
   }
 
-  if (ratingViolations.length === 0 && atisViolations.length === 0 && endorsementViolations.length === 0) {
+  if (ratingViolations.length === 0 && atisViolations.length === 0
+      && endorsementViolations.length === 0 && rosterViolations.length === 0) {
     logger.info('No live violations detected');
-    return { ratingViolations: 0, atisViolations: 0, endorsementViolations: 0, newAlerts: 0, alerted: false };
+    return { ratingViolations: 0, atisViolations: 0, endorsementViolations: 0, rosterViolations: 0, newAlerts: 0, alerted: false };
   }
 
   // Load already-alerted violations from KV to avoid spamming
@@ -1835,13 +1885,20 @@ async function checkAndAlertLiveViolations(env) {
     return !alerted[key] || (now - alerted[key] > LIVE_CHECK_ALERT_COOLDOWN_MS);
   });
 
-  if (newRatingViolations.length > 0 || newAtisViolations.length > 0 || newEndorsementViolations.length > 0) {
-    await sendLiveViolationAlert(env, newRatingViolations, newAtisViolations, newEndorsementViolations);
+  const newRosterViolations = rosterViolations.filter(v => {
+    const key = `roster_${v.cid}_${v.callsign}`;
+    return !alerted[key] || (now - alerted[key] > LIVE_CHECK_ALERT_COOLDOWN_MS);
+  });
+
+  if (newRatingViolations.length > 0 || newAtisViolations.length > 0
+      || newEndorsementViolations.length > 0 || newRosterViolations.length > 0) {
+    await sendLiveViolationAlert(env, newRatingViolations, newAtisViolations, newEndorsementViolations, newRosterViolations);
 
     // Mark as alerted
     for (const v of newRatingViolations) alerted[`rating_${v.cid}_${v.callsign}`] = now;
     for (const v of newAtisViolations) alerted[`atis_${v.cid}`] = now;
     for (const v of newEndorsementViolations) alerted[`endorse_${v.cid}_${v.callsign}`] = now;
+    for (const v of newRosterViolations) alerted[`roster_${v.cid}_${v.callsign}`] = now;
 
     // Prune entries older than 24 hours
     for (const [key, ts] of Object.entries(alerted)) {
@@ -1855,8 +1912,11 @@ async function checkAndAlertLiveViolations(env) {
     ratingViolations: ratingViolations.length,
     atisViolations: atisViolations.length,
     endorsementViolations: endorsementViolations.length,
-    newAlerts: newRatingViolations.length + newAtisViolations.length + newEndorsementViolations.length,
-    alerted: newRatingViolations.length > 0 || newAtisViolations.length > 0 || newEndorsementViolations.length > 0
+    rosterViolations: rosterViolations.length,
+    newAlerts: newRatingViolations.length + newAtisViolations.length
+      + newEndorsementViolations.length + newRosterViolations.length,
+    alerted: newRatingViolations.length > 0 || newAtisViolations.length > 0
+      || newEndorsementViolations.length > 0 || newRosterViolations.length > 0
   };
 }
 
