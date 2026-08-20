@@ -56,6 +56,9 @@ const ACTIVE_ENDORSEMENT_STATUS = 2;
 const SOLO_ENDORSEMENT_STATUS = 1;
 const ENR_SOLO_ENDORSEMENT_SKU = 'enr';
 const TMA_SOLO_ENDORSEMENT_SKU = 'tma';
+// Baseline endorsement every VATPAC local controller must hold to control at all.
+// Suspended/revoked endorsements are dropped from the TMS payload or carry a non-active status.
+const DEV_ENDORSEMENT_SKU = 'dev';
 
 // Minimum rating required for each position suffix
 function getMinRatingForPosition(callsign) {
@@ -97,9 +100,12 @@ function hasFullTmaEndorsement(endorsementsByCid, cid) {
   );
 }
 
-// Matches a standalone "OTS" token in controller info (over-the-shoulder check).
-// Deliberately strict: won't match inside words like PILOTS, SLOTS or ROTS.
-const OTS_MARKER_PATTERN = /(?:^|[^A-Z0-9])OTS(?:[^A-Z0-9]|$)/;
+// Matches an over-the-shoulder marker in controller info. Controllers write this
+// several ways, so accept "OTS", "O.T.S.", "O/T/S", "Over-the-Shoulder",
+// "Over the Shoulder" and "Overtheshoulder".
+// Still anchored on non-alphanumeric boundaries so it won't match inside words
+// like PILOTS, SLOTS, ROTS or DEPOTS.
+const OTS_MARKER_PATTERN = /(?:^|[^A-Z0-9])(?:O[.\/\s-]?T[.\/\s-]?S|OVER[\s-]*THE[\s-]*SHOULDER)(?:[^A-Z0-9]|$)/;
 
 // Controllers running an OTS are supervised, so the rating requirement is waived
 function hasOtsInControllerInfo(controller) {
@@ -131,6 +137,63 @@ const LIVE_CHECK_ALERT_COOLDOWN_MS = 60 * 60 * 1000;
 // KV key for controllers muted from under-hours audit alerts
 // (key name kept for backwards compatibility with stored data)
 const EXCLUSIONS_KV_KEY = 'live_check_exclusions';
+
+// Human-readable names for each TMS endorsement SKU.
+const ENDORSEMENT_LABELS = {
+  dev: 'Development',
+  twr: 'Tower',
+  procTwr: 'Procedural Tower',
+  tma: 'TMA / Approach',
+  enr: 'Enroute',
+  oca: 'Oceanic',
+  sydTcu: 'Sydney Complex'
+};
+
+// Aerodromes whose towers are procedural and need `procTwr` rather than plain `twr`.
+// Left empty means every _TWR position is checked against `twr`. Populate from
+// VATPAC policy to enable procedural-tower enforcement.
+const PROCEDURAL_TWR_POSITIONS = new Set([]);
+
+// Sectors needing the oceanic endorsement. Populate from VATPAC policy to enable.
+const OCEANIC_POSITIONS = new Set([]);
+
+// Endorsement required to control a given position, beyond the baseline `dev`.
+// NOTE: TMS exposes no ground-specific SKU — DEL/GND/FMP are covered by `dev` alone.
+function getRequiredEndorsementSku(callsign) {
+  const cs = String(callsign || '').toUpperCase();
+  if (PROCEDURAL_TWR_POSITIONS.has(cs)) return 'procTwr';
+  if (OCEANIC_POSITIONS.has(cs)) return 'oca';
+  if (cs.endsWith('_TWR')) return 'twr';
+  if (isApproachPosition(cs)) return 'tma';
+  if (isEnroutePosition(cs)) return 'enr';
+  return null;
+}
+
+// True if the controller holds this SKU either fully (status 2) or as a live,
+// unexpired solo (status 1). Which position a solo names is deliberately ignored.
+function holdsEndorsement(endorsementsByCid, cid, sku, now = Date.now()) {
+  const endorsements = endorsementsByCid.get(String(cid)) || [];
+  return endorsements.some(e => {
+    if (String(e?.sku || '').toLowerCase() !== String(sku).toLowerCase()) return false;
+    const status = Number(e?.status);
+    if (status === ACTIVE_ENDORSEMENT_STATUS) return true;
+    if (status !== SOLO_ENDORSEMENT_STATUS) return false;
+    const expiresAt = Date.parse(e?.expires || '');
+    return !(Number.isFinite(expiresAt) && expiresAt <= now);
+  });
+}
+
+// Expiry of the solo that authorises this SKU, if it is a solo rather than a full
+// endorsement. Returns null for full endorsements or solos with no stated expiry.
+function getSoloExpiry(endorsementsByCid, cid, sku) {
+  const endorsements = endorsementsByCid.get(String(cid)) || [];
+  const solo = endorsements.find(e =>
+    String(e?.sku || '').toLowerCase() === String(sku).toLowerCase()
+    && Number(e?.status) === SOLO_ENDORSEMENT_STATUS
+  );
+  const expiresAt = Date.parse(solo?.expires || '');
+  return Number.isFinite(expiresAt) ? new Date(expiresAt).toISOString() : null;
+}
 
 // Positions requiring the Sydney Complex (sydTcu) endorsement
 const SYD_COMPLEX_POSITIONS = new Set([
@@ -375,8 +438,8 @@ async function handleAPI(request, env) {
 
     // DEBUG: Check TMS data
     if (path === '/api/debug/tms' && method === 'GET') {
-      const visitingCids = await getTMSList('visiting');
-      const localCids = await getTMSList('local');
+      const visitingCids = await getTMSList('visiting', env);
+      const localCids = await getTMSList('local', env);
       return jsonResponse({
         visiting: {
           count: visitingCids.length,
@@ -452,17 +515,102 @@ async function handleAPI(request, env) {
 
 // ==================== Audit Logic ====================
 
-// Cache TMS results
+// Cache TMS results.
+// The in-memory copy only survives while a Worker isolate stays warm, and cron
+// ticks routinely land on a cold isolate. Without a shared copy in KV the 5-minute
+// TTL does nothing and we re-pull VATPAC's entire user table on every single tick.
 let TMS_CACHE = null;
 let TMS_CACHE_TS = 0;
 
-async function getTMSList(scope = "visiting") {
+const TMS_KV_CACHE_KEY = 'tms_users_cache';
+const TMS_FAILURE_KEY = 'tms_failure_until';
+// After a TMS error, stop asking for this long. VATPAC run this service themselves;
+// retrying once a minute through an outage is exactly the behaviour to avoid.
+const TMS_FAILURE_BACKOFF_MS = 15 * 60 * 1000;
+
+// Scope predicates live at module scope so a KV-restored cache can reuse them.
+function tmsIsLocal(u) {
+  const divisionId = String(u?.division?.id || "").toUpperCase();
+  const typeStr = String(u?.type || "").toLowerCase();
+  const localFlag = u?.local === true || u?.is_local === true;
+  return divisionId === "PAC" || localFlag || /local/.test(typeStr);
+}
+
+// Divisions excluded from visiting controller checks
+const EXCLUDED_VISITING_DIVISIONS = new Set(["NZ"]);
+
+function tmsIsVisiting(u) {
+  const divisionId = String(u?.division?.id || "").toUpperCase();
+  if (EXCLUDED_VISITING_DIVISIONS.has(divisionId)) return false;
+  const typeStr = String(u?.type || "").toLowerCase();
+  const visitingFlag = u?.local === false || u?.is_local === false || u?.is_visiting === true;
+  return divisionId !== "PAC" || visitingFlag || /visit/.test(typeStr);
+}
+
+async function loadTMSCacheFromKV(env) {
+  if (!env?.hours) return false;
+  try {
+    const cached = await env.hours.get(TMS_KV_CACHE_KEY, { type: 'json' });
+    if (!cached?.users?.length) return false;
+    if (Date.now() - (cached.savedAt || 0) >= TMS_CACHE_TTL_MS) return false;
+    TMS_CACHE = { users: cached.users, isLocal: tmsIsLocal, isVisiting: tmsIsVisiting };
+    TMS_CACHE_TS = cached.savedAt;
+    logger.info('TMS cache reused from KV', { users: cached.users.length, ageMs: Date.now() - cached.savedAt });
+    return true;
+  } catch (e) {
+    logger.warn('TMS KV cache read failed', { error: e?.message });
+    return false;
+  }
+}
+
+async function saveTMSCacheToKV(env, users) {
+  if (!env?.hours) return;
+  try {
+    await env.hours.put(TMS_KV_CACHE_KEY, JSON.stringify({ users, savedAt: Date.now() }));
+  } catch (e) {
+    logger.warn('TMS KV cache write failed', { error: e?.message });
+  }
+}
+
+async function isTMSInBackoff(env) {
+  if (!env?.hours) return false;
+  try {
+    const until = await env.hours.get(TMS_FAILURE_KEY, { type: 'json' });
+    return Number.isFinite(until) && Date.now() < until;
+  } catch {
+    return false;
+  }
+}
+
+async function setTMSBackoff(env) {
+  if (!env?.hours) return;
+  try {
+    await env.hours.put(TMS_FAILURE_KEY, JSON.stringify(Date.now() + TMS_FAILURE_BACKOFF_MS));
+  } catch { /* best effort */ }
+}
+
+async function getTMSList(scope = "visiting", env = null) {
   if (TMS_CACHE && (Date.now() - TMS_CACHE_TS) < TMS_CACHE_TTL_MS) {
     const filtered = TMS_CACHE.users.filter(u => (scope === "local" ? TMS_CACHE.isLocal(u) : TMS_CACHE.isVisiting(u)));
     return filtered.map(u => ({
       cid: String(u.cid),
       rating: u.rating?.short || 'N/A'
     })).filter(u => u.cid);
+  }
+
+  // Try the shared KV copy before contacting VATPAC's server at all.
+  if (await loadTMSCacheFromKV(env)) {
+    const filtered = TMS_CACHE.users.filter(u => (scope === "local" ? TMS_CACHE.isLocal(u) : TMS_CACHE.isVisiting(u)));
+    return filtered.map(u => ({
+      cid: String(u.cid),
+      rating: u.rating?.short || 'N/A',
+      division: String(u?.division?.id || '').toUpperCase()
+    })).filter(u => u.cid);
+  }
+
+  if (await isTMSInBackoff(env)) {
+    logger.warn('TMS is in failure backoff — not contacting it this tick', { scope });
+    throw new Error('TMS unavailable: in failure backoff after a recent error');
   }
 
   logger.info('Fetching TMS data', { scope });
@@ -474,6 +622,7 @@ async function getTMSList(scope = "visiting") {
   // Limit TMS fetches to avoid subrequest limits
   const maxPages = 10; // Max 2000 users
   let pageCount = 0;
+  let fetchFailed = false;
 
   while (pageCount < maxPages) {
     try {
@@ -481,6 +630,7 @@ async function getTMSList(scope = "visiting") {
         headers: { "User-Agent": "VATPAC-Audit-Worker" }
       });
       if (!r.ok) {
+        fetchFailed = true;
         logger.warn('TMS fetch failed', { status: r.status, offset });
         break;
       }
@@ -492,32 +642,35 @@ async function getTMSList(scope = "visiting") {
       offset += pageSize;
       pageCount++;
     } catch (err) {
+      fetchFailed = true;
       logger.error('TMS fetch error', err, { pageCount, offset });
       break;
     }
   }
 
-  // Robust scope detection
-  function isLocal(u) {
-    const divisionId = String(u?.division?.id || "").toUpperCase();
-    const typeStr = String(u?.type || "").toLowerCase();
-    const localFlag = u?.local === true || u?.is_local === true;
-    return divisionId === "PAC" || localFlag || /local/.test(typeStr);
+  // A TMS outage must never look like "nobody is in the division". Caching an
+  // empty list here would silence every rating and endorsement check for the
+  // full cache TTL, so fail loudly instead.
+  if (users.length === 0) {
+    logger.error('TMS returned no users — refusing to cache empty list', null, { scope, fetchFailed });
+    await setTMSBackoff(env);
+    throw new Error('TMS unavailable: no users returned');
   }
 
-  // Divisions excluded from visiting controller checks
-  const EXCLUDED_VISITING_DIVISIONS = new Set(["NZ"]);
+  // Robust scope detection (shared with the KV-restored cache)
+  const isLocal = tmsIsLocal;
+  const isVisiting = tmsIsVisiting;
 
-  function isVisiting(u) {
-    const divisionId = String(u?.division?.id || "").toUpperCase();
-    if (EXCLUDED_VISITING_DIVISIONS.has(divisionId)) return false;
-    const typeStr = String(u?.type || "").toLowerCase();
-    const visitingFlag = u?.local === false || u?.is_local === false || u?.is_visiting === true;
-    return divisionId !== "PAC" || visitingFlag || /visit/.test(typeStr);
+  if (fetchFailed) {
+    logger.warn('TMS returned partial data — using it for this run but not caching', {
+      usersRetrieved: users.length, scope
+    });
+    await setTMSBackoff(env);
+  } else {
+    TMS_CACHE = { users, isLocal, isVisiting };
+    TMS_CACHE_TS = Date.now();
+    await saveTMSCacheToKV(env, users);
   }
-
-  TMS_CACHE = { users, isLocal, isVisiting };
-  TMS_CACHE_TS = Date.now();
 
   const filtered = users.filter(u => (scope === "local" ? isLocal(u) : isVisiting(u)));
   const usersWithRating = filtered.map(u => ({
@@ -536,16 +689,19 @@ async function getTMSList(scope = "visiting") {
   return usersWithRating;
 }
 
-async function ensureTMSCache() {
+async function ensureTMSCache(env = null) {
   if (!TMS_CACHE || (Date.now() - TMS_CACHE_TS) >= TMS_CACHE_TTL_MS) {
-    await getTMSList('local');
+    await getTMSList('local', env);
+  }
+  if (!TMS_CACHE?.users?.length) {
+    throw new Error('TMS unavailable: endorsement data could not be loaded');
   }
 }
 
 // Returns Map<cid, Set<sku>> of full active (status 2) endorsements for all TMS users
-async function getTMSEndorsementMap() {
+async function getTMSEndorsementMap(env = null) {
   // Populate cache if stale/empty (piggybacks on existing getTMSList cache)
-  await ensureTMSCache();
+  await ensureTMSCache(env);
   const map = new Map();
   if (!TMS_CACHE?.users) return map;
   for (const user of TMS_CACHE.users) {
@@ -560,8 +716,8 @@ async function getTMSEndorsementMap() {
 }
 
 // Returns Map<cid, endorsements[]> with raw TMS endorsement details, including solos.
-async function getTMSEndorsementsByCid() {
-  await ensureTMSCache();
+async function getTMSEndorsementsByCid(env = null) {
+  await ensureTMSCache(env);
   const map = new Map();
   if (!TMS_CACHE?.users) return map;
   for (const user of TMS_CACHE.users) {
@@ -931,7 +1087,7 @@ async function getATCHours(cid, monthsBack = 3, env = null) {
 async function runAudit(env, store, type) {
   logger.info('Starting audit', { type });
 
-  const allCids = await getTMSList(type);
+  const allCids = await getTMSList(type, env);
   logger.info('TMS list retrieved', { type, count: allCids.length });
 
   const isLocal = type === "local";
@@ -1318,7 +1474,7 @@ async function checkLiveVatsimData(env) {
     });
     if (!response.ok) {
       logger.error('Failed to fetch VATSIM data', null, { status: response.status });
-      return { ratingViolations: [], atisViolations: [], endorsementViolations: [] };
+      return { ratingViolations: [], atisViolations: [], endorsementViolations: [], skipped: true, reason: `VATSIM data fetch failed (HTTP ${response.status})` };
     }
 
     const vatsimData = await response.json();
@@ -1326,12 +1482,12 @@ async function checkLiveVatsimData(env) {
     const atisConnections = vatsimData?.atis || [];
 
     // Get local controller CIDs from TMS
-    const localCids = await getTMSList('local');
+    const localCids = await getTMSList('local', env);
     const localCidSet = new Set(localCids.map(u => String(u.cid)));
 
     // Get endorsement map for all TMS users (reuses same cache)
-    const endorsementMap = await getTMSEndorsementMap();
-    const endorsementsByCid = await getTMSEndorsementsByCid();
+    const endorsementMap = await getTMSEndorsementMap(env);
+    const endorsementsByCid = await getTMSEndorsementsByCid(env);
 
     const ratingViolations = [];
     const atisViolations = [];
@@ -1348,17 +1504,21 @@ async function checkLiveVatsimData(env) {
       // Only check VATPAC positions
       if (!VATPAC_CALLSIGNS.has(callsign)) continue;
 
+      const isOtsSession = hasOtsInControllerInfo(controller);
+      let ratingFlagged = false;
+
       // Rating check — local controllers only
       if (localCidSet.has(cid)) {
         const minRating = getMinRatingForPosition(callsign);
         const hasEnrSolo = hasValidEnrSoloEndorsement(endorsementsByCid, cid, callsign, now);
         const hasTmaSolo = hasValidTmaSoloEndorsement(endorsementsByCid, cid, callsign, now);
-        const isOts = hasOtsInControllerInfo(controller);
+        const isOts = isOtsSession;
         if (rating < minRating && isOts) {
           otsExempt++;
           logger.info('Rating violation skipped — OTS in controller info', { cid, callsign });
         }
         if (rating < minRating && !hasEnrSolo && !hasTmaSolo && !isOts) {
+          ratingFlagged = true;
           ratingViolations.push({
             cid,
             callsign,
@@ -1371,6 +1531,37 @@ async function checkLiveVatsimData(env) {
         }
       }
 
+      // Endorsement checks — local controllers only. Visiting controllers are
+      // excluded because TMS never issues them a `dev` endorsement.
+      if (localCidSet.has(cid) && endorsementMap.has(cid)) {
+        const pushViolation = (sku, soloExpiry) => endorsementViolations.push({
+          cid,
+          callsign,
+          rating,
+          ratingShort: RATING_MAP[rating] || `R${rating}`,
+          missingSku: sku,
+          missingEndorsement: `${ENDORSEMENT_LABELS[sku] || sku} (${sku})`,
+          soloExpiry: soloExpiry || null,
+          logonTime: controller.logon_time
+        });
+
+        // Baseline: a suspended or revoked `dev` endorsement means they should not
+        // be controlling anything. Deliberately NOT waived by an OTS — a suspension
+        // is a standing decision, not something a supervised session overrides.
+        if (!holdsEndorsement(endorsementsByCid, cid, DEV_ENDORSEMENT_SKU, now)) {
+          pushViolation(DEV_ENDORSEMENT_SKU);
+        }
+
+        // Position-specific endorsement (twr / tma / enr / procTwr / oca).
+        // Skipped when the rating check already flagged them for this position,
+        // and waived during a supervised OTS just like the rating requirement.
+        const requiredSku = getRequiredEndorsementSku(callsign);
+        if (requiredSku && !ratingFlagged && !isOtsSession
+            && !holdsEndorsement(endorsementsByCid, cid, requiredSku, now)) {
+          pushViolation(requiredSku);
+        }
+      }
+
       // Endorsement check — any TMS user on a Sydney Complex position
       if (SYD_COMPLEX_POSITIONS.has(callsign) && endorsementMap.has(cid)) {
         if (!endorsementMap.get(cid).has('sydTcu')) {
@@ -1379,7 +1570,9 @@ async function checkLiveVatsimData(env) {
             callsign,
             rating,
             ratingShort: RATING_MAP[rating] || `R${rating}`,
+            missingSku: 'sydTcu',
             missingEndorsement: 'Sydney Complex (sydTcu)',
+            soloExpiry: null,
             logonTime: controller.logon_time
           });
         }
@@ -1447,9 +1640,53 @@ async function checkLiveVatsimData(env) {
     return { ratingViolations, atisViolations, endorsementViolations };
 
   } catch (err) {
-    logger.error('Live VATSIM check failed', err);
-    return { ratingViolations: [], atisViolations: [], endorsementViolations: [] };
+    // An upstream outage must not be reported as "no violations found" — that is
+    // exactly how a missed alert looks in the logs.
+    logger.error('Live VATSIM check failed — results are NOT a clean bill of health', err);
+    return { ratingViolations: [], atisViolations: [], endorsementViolations: [], skipped: true, reason: err?.message || String(err) };
   }
+}
+
+// VATPAC brand assets (served from vatpac.org).
+const VATPAC_LOGO_URL = 'https://vatpac.org/assets/brand/logo-white.png';
+const VATPAC_SITE_URL = 'https://vatpac.org';
+const ALERT_COLOR = 0xD32F2F;
+
+function vatsimStatsUrl(cid) {
+  return `https://stats.vatsim.net/stats/${cid}`;
+}
+
+// Discord renders <t:unix:R> as a live-updating "23 minutes ago", which stays
+// accurate however long the alert sits in the channel.
+function discordRelativeTime(isoOrMs) {
+  const ms = typeof isoOrMs === 'number' ? isoOrMs : Date.parse(isoOrMs || '');
+  if (!Number.isFinite(ms)) return null;
+  return `<t:${Math.floor(ms / 1000)}:R>`;
+}
+
+// Discord caps a field value at 1024 chars. Splitting across fields keeps every
+// entry visible instead of silently truncating the tail of a long list.
+function chunkIntoFields(name, lines) {
+  const fields = [];
+  let buf = [];
+  let len = 0;
+  const flush = () => {
+    if (!buf.length) return;
+    fields.push({
+      name: fields.length ? `${name} (cont.)` : name,
+      value: buf.join('\n'),
+      inline: false
+    });
+    buf = [];
+    len = 0;
+  };
+  for (const line of lines) {
+    if (len + line.length + 1 > 1024) flush();
+    buf.push(line);
+    len += line.length + 1;
+  }
+  flush();
+  return fields;
 }
 
 async function sendLiveViolationAlert(env, ratingViolations, atisViolations, endorsementViolations = []) {
@@ -1459,52 +1696,84 @@ async function sendLiveViolationAlert(env, ratingViolations, atisViolations, end
     return;
   }
 
-  if (ratingViolations.length === 0 && atisViolations.length === 0 && endorsementViolations.length === 0) return;
+  const totalIssues = ratingViolations.length + atisViolations.length + endorsementViolations.length;
+  if (totalIssues === 0) return;
+
+  const affectedCids = new Set([
+    ...ratingViolations.map(v => v.cid),
+    ...atisViolations.map(v => v.cid),
+    ...endorsementViolations.map(v => v.cid)
+  ]);
+
+  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  const tick = '`';
 
   const embed = {
-    title: '\u{1f6a8} Live Rating Violation Detected',
-    color: 0xff0000,
+    title: '\u{1f6a8} Live Controller Violations',
+    url: VATPAC_SITE_URL,
+    description: `${plural(totalIssues, 'issue')} detected across ${plural(affectedCids.size, 'controller')} currently online.`,
+    color: ALERT_COLOR,
+    thumbnail: { url: VATPAC_LOGO_URL },
     timestamp: new Date().toISOString(),
-    fields: []
+    fields: [],
+    footer: { text: 'VATPAC Controller Audit • Live Check' }
   };
 
-  if (ratingViolations.length > 0) {
-    const lines = ratingViolations.map(v =>
-      `\u2022 **${v.cid}** on \`${v.callsign}\` \u2014 Rating: **${v.ratingShort}** (requires **${v.requiredRatingShort}**)`
-    );
-    embed.fields.push({
-      name: `\u26a0\ufe0f Insufficient Rating (${ratingViolations.length})`,
-      value: lines.join('\n').slice(0, 1024),
-      inline: false
+  // Endorsement issues lead: a suspended endorsement is the most actionable finding.
+  if (endorsementViolations.length > 0) {
+    const lines = endorsementViolations.map(v => {
+      const parts = [
+        `• **${tick}${v.callsign}${tick}** — [${v.cid}](${vatsimStatsUrl(v.cid)})`,
+        `Missing **${v.missingEndorsement}**`
+      ];
+      if (v.ratingShort) parts.push(`Rating **${v.ratingShort}**`);
+      const solo = discordRelativeTime(v.soloExpiry);
+      if (solo) parts.push(`Solo expired ${solo}`);
+      const on = discordRelativeTime(v.logonTime);
+      if (on) parts.push(`Online since ${on}`);
+      return parts.join(' · ');
     });
+    embed.fields.push(...chunkIntoFields(`\u{1f6ab} Missing Endorsement (${endorsementViolations.length})`, lines));
+  }
+
+  if (ratingViolations.length > 0) {
+    const lines = ratingViolations.map(v => {
+      const parts = [
+        `• **${tick}${v.callsign}${tick}** — [${v.cid}](${vatsimStatsUrl(v.cid)})`,
+        `Rating **${v.ratingShort}**, requires **${v.requiredRatingShort}**`
+      ];
+      const on = discordRelativeTime(v.logonTime);
+      if (on) parts.push(`Online since ${on}`);
+      return parts.join(' · ');
+    });
+    embed.fields.push(...chunkIntoFields(`⚠️ Insufficient Rating (${ratingViolations.length})`, lines));
   }
 
   if (atisViolations.length > 0) {
     const lines = atisViolations.map(v => {
-      const callsigns = v.atisCallsigns.map(c => `\`${c}\``).join(', ');
-      const ctrl = v.controlCallsign ? ` | Controlling: \`${v.controlCallsign}\`` : '';
-      return `\u2022 **${v.cid}** (${v.ratingShort}) \u2014 ${v.atisCount} ATIS: ${callsigns}${ctrl}`;
+      const callsigns = (v.atisCallsigns || []).map(c => `${tick}${c}${tick}`).join(', ');
+      const parts = [
+        `• [${v.cid}](${vatsimStatsUrl(v.cid)}) (**${v.ratingShort}**) — ${v.atisCount} ATIS connections: ${callsigns}`
+      ];
+      if (v.controlCallsign) parts.push(`Controlling **${tick}${v.controlCallsign}${tick}**`);
+      return parts.join(' · ');
     });
-    embed.fields.push({
-      name: `\u{1f4e1} S1/S2 Multiple ATIS (${atisViolations.length})`,
-      value: lines.join('\n').slice(0, 1024),
-      inline: false
-    });
+    embed.fields.push(...chunkIntoFields(`\u{1f4e1} S1/S2 Multiple ATIS (${atisViolations.length})`, lines));
   }
 
-  if (endorsementViolations.length > 0) {
-    const lines = endorsementViolations.map(v =>
-      `\u2022 **${v.cid}** on \`${v.callsign}\` \u2014 Missing: **${v.missingEndorsement}**`
-    );
+  // Discord allows at most 25 fields per embed.
+  if (embed.fields.length > 25) {
+    const dropped = embed.fields.length - 24;
+    embed.fields = embed.fields.slice(0, 24);
     embed.fields.push({
-      name: `\u{1f6ab} Missing Endorsement (${endorsementViolations.length})`,
-      value: lines.join('\n').slice(0, 1024),
+      name: '… And More',
+      value: `${dropped} further field(s) omitted — see ${tick}/api/live-check${tick} for the full list.`,
       inline: false
     });
   }
 
   const body = {
-    content: `<@&${DISCORD_ROLE_ID}> Live controller violations detected!`,
+    content: `<@&${DISCORD_ROLE_ID}> **${plural(totalIssues, 'Live Controller Violation')}** Detected`,
     embeds: [embed]
   };
 
@@ -1520,7 +1789,8 @@ async function sendLiveViolationAlert(env, ratingViolations, atisViolations, end
     } else {
       logger.info('Live violation Discord notification sent', {
         ratingViolations: ratingViolations.length,
-        atisViolations: atisViolations.length
+        atisViolations: atisViolations.length,
+        endorsementViolations: endorsementViolations.length
       });
     }
   } catch (err) {
@@ -1529,7 +1799,12 @@ async function sendLiveViolationAlert(env, ratingViolations, atisViolations, end
 }
 
 async function checkAndAlertLiveViolations(env) {
-  const { ratingViolations, atisViolations, endorsementViolations } = await checkLiveVatsimData(env);
+  const { ratingViolations, atisViolations, endorsementViolations, skipped, reason } = await checkLiveVatsimData(env);
+
+  if (skipped) {
+    logger.error('Live violation check could not run — upstream data unavailable', null, { reason });
+    return { skipped: true, reason, ratingViolations: 0, atisViolations: 0, endorsementViolations: 0, newAlerts: 0, alerted: false };
+  }
 
   if (ratingViolations.length === 0 && atisViolations.length === 0 && endorsementViolations.length === 0) {
     logger.info('No live violations detected');
