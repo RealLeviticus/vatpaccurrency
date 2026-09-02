@@ -134,6 +134,15 @@ function hasValidEnrSoloEndorsement(endorsementsByCid, cid, callsign, now = Date
 // Cooldown per violation to avoid Discord spam (1 hour)
 const LIVE_CHECK_ALERT_COOLDOWN_MS = 60 * 60 * 1000;
 
+// Controllers routinely connect before VATPAC's TMS roster catches up, so a single
+// absent reading proves nothing. Hold a roster absence for this long and re-verify it
+// against a forced, fresh TMS pull before alerting. The window is deliberately longer
+// than TMS_CACHE_TTL_MS so at least one independent roster read lands inside it.
+const ROSTER_CONFIRMATION_DELAY_MS = 10 * 60 * 1000;
+
+// KV key holding first-seen timestamps for roster absences awaiting confirmation
+const ROSTER_PENDING_KV_KEY = 'roster_pending_confirmation';
+
 // KV key for controllers muted from under-hours audit alerts
 // (key name kept for backwards compatibility with stored data)
 const EXCLUSIONS_KV_KEY = 'live_check_exclusions';
@@ -521,6 +530,10 @@ async function handleAPI(request, env) {
 // TTL does nothing and we re-pull VATPAC's entire user table on every single tick.
 let TMS_CACHE = null;
 let TMS_CACHE_TS = 0;
+// Whether TMS_CACHE holds the whole roster. A truncated pull must never be allowed to
+// answer "is this CID on the roster?" — every user it is missing looks exactly like a
+// controller who has been removed.
+let TMS_CACHE_COMPLETE = false;
 
 // Below this many roster entries we refuse to conclude that anyone is "absent"
 // from it — a short read would otherwise flag every controller online.
@@ -559,7 +572,13 @@ async function loadTMSCacheFromKV(env) {
     if (Date.now() - (cached.savedAt || 0) >= TMS_CACHE_TTL_MS) return false;
     TMS_CACHE = { users: cached.users, isLocal: tmsIsLocal, isVisiting: tmsIsVisiting };
     TMS_CACHE_TS = cached.savedAt;
-    logger.info('TMS cache reused from KV', { users: cached.users.length, ageMs: Date.now() - cached.savedAt });
+    // Only complete pulls are ever written to KV; entries predating this field are complete.
+    TMS_CACHE_COMPLETE = cached.complete !== false;
+    logger.info('TMS cache reused from KV', {
+      users: cached.users.length,
+      ageMs: Date.now() - cached.savedAt,
+      complete: TMS_CACHE_COMPLETE
+    });
     return true;
   } catch (e) {
     logger.warn('TMS KV cache read failed', { error: e?.message });
@@ -570,7 +589,7 @@ async function loadTMSCacheFromKV(env) {
 async function saveTMSCacheToKV(env, users) {
   if (!env?.hours) return;
   try {
-    await env.hours.put(TMS_KV_CACHE_KEY, JSON.stringify({ users, savedAt: Date.now() }));
+    await env.hours.put(TMS_KV_CACHE_KEY, JSON.stringify({ users, savedAt: Date.now(), complete: true }));
   } catch (e) {
     logger.warn('TMS KV cache write failed', { error: e?.message });
   }
@@ -593,8 +612,10 @@ async function setTMSBackoff(env) {
   } catch { /* best effort */ }
 }
 
-async function getTMSList(scope = "visiting", env = null) {
-  if (TMS_CACHE && (Date.now() - TMS_CACHE_TS) < TMS_CACHE_TTL_MS) {
+// `force` bypasses both cache layers and re-pulls the roster from TMS. Used when an
+// absence is about to become an alert and a stale read is not good enough.
+async function getTMSList(scope = "visiting", env = null, { force = false } = {}) {
+  if (!force && TMS_CACHE && (Date.now() - TMS_CACHE_TS) < TMS_CACHE_TTL_MS) {
     const filtered = TMS_CACHE.users.filter(u => (scope === "local" ? TMS_CACHE.isLocal(u) : TMS_CACHE.isVisiting(u)));
     return filtered.map(u => ({
       cid: String(u.cid),
@@ -603,7 +624,7 @@ async function getTMSList(scope = "visiting", env = null) {
   }
 
   // Try the shared KV copy before contacting VATPAC's server at all.
-  if (await loadTMSCacheFromKV(env)) {
+  if (!force && await loadTMSCacheFromKV(env)) {
     const filtered = TMS_CACHE.users.filter(u => (scope === "local" ? TMS_CACHE.isLocal(u) : TMS_CACHE.isVisiting(u)));
     return filtered.map(u => ({
       cid: String(u.cid),
@@ -627,6 +648,7 @@ async function getTMSList(scope = "visiting", env = null) {
   const maxPages = 10; // Max 2000 users
   let pageCount = 0;
   let fetchFailed = false;
+  let expectedTotal = null;
 
   while (pageCount < maxPages) {
     try {
@@ -640,8 +662,13 @@ async function getTMSList(scope = "visiting", env = null) {
       }
       const j = await r.json();
       const chunk = Array.isArray(j?.data) ? j.data : [];
+      // TMS reports the full roster size alongside every page. Without it, a short read
+      // is indistinguishable from a genuinely small roster.
+      if (Number.isFinite(j?.count)) expectedTotal = j.count;
       users = users.concat(chunk);
-      logger.info('TMS page fetched', { page: pageCount + 1, chunkSize: chunk.length, totalUsers: users.length });
+      logger.info('TMS page fetched', {
+        page: pageCount + 1, chunkSize: chunk.length, totalUsers: users.length, expectedTotal
+      });
       if (chunk.length < pageSize) break;
       offset += pageSize;
       pageCount++;
@@ -661,18 +688,36 @@ async function getTMSList(scope = "visiting", env = null) {
     throw new Error('TMS unavailable: no users returned');
   }
 
+  // A page can return HTTP 200 with fewer rows than promised, ending the pagination loop
+  // early with fetchFailed still false — the truncated list would then be cached as
+  // authoritative and every missing controller flagged as off the roster. Because the
+  // roster is sorted by ascending CID, a short read drops the newest controllers first:
+  // exactly the people most likely to be online right after a rating is issued.
+  if (Number.isFinite(expectedTotal) && users.length !== expectedTotal) {
+    fetchFailed = true;
+    logger.error('TMS roster short read — row count does not match the reported total', null, {
+      retrieved: users.length, expected: expectedTotal, scope
+    });
+  }
+
   // Robust scope detection (shared with the KV-restored cache)
   const isLocal = tmsIsLocal;
   const isVisiting = tmsIsVisiting;
 
+  TMS_CACHE = { users, isLocal, isVisiting };
+  TMS_CACHE_TS = Date.now();
+  TMS_CACHE_COMPLETE = !fetchFailed;
+
   if (fetchFailed) {
-    logger.warn('TMS returned partial data — using it for this run but not caching', {
-      usersRetrieved: users.length, scope
+    // Keep the partial list in memory so rating, endorsement and ATIS checks still run
+    // this tick — those only ever act on users they can see, so a short list costs
+    // coverage, not correctness. Roster absence checks stand down instead, and nothing
+    // is written to KV: no other isolate should inherit a short read.
+    logger.warn('TMS returned partial data — presence checks only, absence checks disabled', {
+      usersRetrieved: users.length, expectedTotal, scope
     });
     await setTMSBackoff(env);
   } else {
-    TMS_CACHE = { users, isLocal, isVisiting };
-    TMS_CACHE_TS = Date.now();
     await saveTMSCacheToKV(env, users);
   }
 
@@ -693,13 +738,28 @@ async function getTMSList(scope = "visiting", env = null) {
   return usersWithRating;
 }
 
-async function ensureTMSCache(env = null) {
-  if (!TMS_CACHE || (Date.now() - TMS_CACHE_TS) >= TMS_CACHE_TTL_MS) {
-    await getTMSList('local', env);
+async function ensureTMSCache(env = null, { force = false } = {}) {
+  if (force || !TMS_CACHE || (Date.now() - TMS_CACHE_TS) >= TMS_CACHE_TTL_MS) {
+    await getTMSList('local', env, { force });
   }
   if (!TMS_CACHE?.users?.length) {
     throw new Error('TMS unavailable: endorsement data could not be loaded');
   }
+}
+
+// True only when the cached roster is known to be the complete one.
+function isTMSDataComplete() {
+  return TMS_CACHE_COMPLETE === true;
+}
+
+// Every CID on the roster, from a pull known to be complete. Throws rather than
+// returning a short set, because the only caller uses this to prove someone is absent.
+async function getTMSRosterCidSet(env = null, { force = false } = {}) {
+  await ensureTMSCache(env, { force });
+  if (!isTMSDataComplete()) {
+    throw new Error('TMS roster incomplete — cannot verify roster absence');
+  }
+  return new Set((TMS_CACHE.users || []).map(u => String(u.cid || '')).filter(Boolean));
 }
 
 // Returns Map<cid, Set<sku>> of full active (status 2) endorsements for all TMS users
@@ -1478,7 +1538,7 @@ async function checkLiveVatsimData(env) {
     });
     if (!response.ok) {
       logger.error('Failed to fetch VATSIM data', null, { status: response.status });
-      return { ratingViolations: [], atisViolations: [], endorsementViolations: [], rosterViolations: [], skipped: true, reason: `VATSIM data fetch failed (HTTP ${response.status})` };
+      return { ratingViolations: [], atisViolations: [], endorsementViolations: [], rosterViolations: [], rosterChecked: false, skipped: true, reason: `VATSIM data fetch failed (HTTP ${response.status})` };
     }
 
     const vatsimData = await response.json();
@@ -1501,11 +1561,13 @@ async function checkLiveVatsimData(env) {
     // Suspension presents as removal from the TMS roster rather than as a
     // downgraded endorsement status, so someone controlling a VATPAC position
     // while absent from the roster is the strongest signal available.
-    const rosterTrustworthy = endorsementMap.size >= MIN_ROSTER_SIZE_FOR_ABSENCE_CHECK;
+    const rosterComplete = isTMSDataComplete();
+    const rosterTrustworthy = rosterComplete && endorsementMap.size >= MIN_ROSTER_SIZE_FOR_ABSENCE_CHECK;
     if (!rosterTrustworthy) {
-      logger.warn('TMS roster too small to trust absence checks — skipping them', {
+      logger.warn('Roster absence checks skipped — TMS data not trustworthy', {
         rosterSize: endorsementMap.size,
-        required: MIN_ROSTER_SIZE_FOR_ABSENCE_CHECK
+        required: MIN_ROSTER_SIZE_FOR_ABSENCE_CHECK,
+        complete: rosterComplete
       });
     }
     const now = Date.now();
@@ -1667,13 +1729,13 @@ async function checkLiveVatsimData(env) {
       otsExempt
     });
 
-    return { ratingViolations, atisViolations, endorsementViolations, rosterViolations };
+    return { ratingViolations, atisViolations, endorsementViolations, rosterViolations, rosterChecked: rosterTrustworthy };
 
   } catch (err) {
     // An upstream outage must not be reported as "no violations found" — that is
     // exactly how a missed alert looks in the logs.
     logger.error('Live VATSIM check failed — results are NOT a clean bill of health', err);
-    return { ratingViolations: [], atisViolations: [], endorsementViolations: [], rosterViolations: [], skipped: true, reason: err?.message || String(err) };
+    return { ratingViolations: [], atisViolations: [], endorsementViolations: [], rosterViolations: [], rosterChecked: false, skipped: true, reason: err?.message || String(err) };
   }
 }
 
@@ -1847,17 +1909,135 @@ async function sendLiveViolationAlert(env, ratingViolations, atisViolations, end
   }
 }
 
+// ==================== Roster Absence Confirmation ====================
+
+// Normalises a stored entry. Tolerates the bare timestamp an earlier revision wrote.
+function readRosterPendingEntry(raw) {
+  if (Number.isFinite(raw)) return { firstSeen: raw, confirmed: false };
+  if (raw && Number.isFinite(raw.firstSeen)) {
+    return { firstSeen: raw.firstSeen, confirmed: raw.confirmed === true };
+  }
+  return null;
+}
+
+// A controller who has just been issued a rating can be online and controlling before
+// VATPAC's TMS roster lists them, so a single "not on roster" reading is a suspicion,
+// not a finding. The absence is recorded and left to sit; only once it has persisted
+// for ROSTER_CONFIRMATION_DELAY_MS is it re-checked against a forced, uncached TMS
+// pull. Anything that resolves in the meantime — the roster catching up, or the
+// controller disconnecting — drops out silently and never reaches Discord.
+//
+// Returns only those absences proven against a fresh pull.
+async function confirmRosterViolations(env, violations) {
+  let pending = {};
+  try {
+    pending = await env.hours.get(ROSTER_PENDING_KV_KEY, { type: 'json' }) || {};
+  } catch (e) {
+    logger.warn('Roster confirmation state unreadable — starting fresh', { error: e?.message });
+  }
+
+  const now = Date.now();
+  const stillAbsent = new Set();
+  const dueForRecheck = [];
+  const confirmed = [];
+
+  for (const v of violations) {
+    const key = `${v.cid}_${v.callsign}`;
+    stillAbsent.add(key);
+    const entry = readRosterPendingEntry(pending[key]);
+
+    if (!entry) {
+      pending[key] = { firstSeen: now, confirmed: false };
+      logger.info('Roster absence noted — holding for confirmation before alerting', {
+        cid: v.cid, callsign: v.callsign, confirmAfterMs: ROSTER_CONFIRMATION_DELAY_MS
+      });
+      continue;
+    }
+
+    // Already proven against a fresh pull, and this tick still shows them absent.
+    if (entry.confirmed) {
+      confirmed.push(v);
+      continue;
+    }
+
+    if (now - entry.firstSeen < ROSTER_CONFIRMATION_DELAY_MS) {
+      logger.info('Roster absence still inside confirmation window', {
+        cid: v.cid, callsign: v.callsign, ageMs: now - entry.firstSeen
+      });
+      continue;
+    }
+
+    dueForRecheck.push({ violation: v, key, firstSeen: entry.firstSeen });
+  }
+
+  // Anyone no longer absent has either appeared on the roster or gone offline. Forget
+  // them, so any later session starts its own confirmation window from scratch.
+  for (const key of Object.keys(pending)) {
+    if (stillAbsent.has(key)) continue;
+    delete pending[key];
+    logger.info('Roster absence cleared before it was ever alerted', { key });
+  }
+
+  if (dueForRecheck.length > 0) {
+    let rosterCids = null;
+    try {
+      // Forced: the entire point of the wait is to ask TMS again, not to re-read the
+      // same copy we were holding when the absence was first noticed.
+      rosterCids = await getTMSRosterCidSet(env, { force: true });
+    } catch (e) {
+      logger.warn('Roster re-verification unavailable — holding alerts until the next tick', {
+        error: e?.message, held: dueForRecheck.length
+      });
+    }
+
+    if (rosterCids) {
+      for (const { violation, key, firstSeen } of dueForRecheck) {
+        if (rosterCids.has(String(violation.cid))) {
+          delete pending[key];
+          logger.info('Roster absence disproved on re-check — TMS had simply not caught up', {
+            cid: violation.cid, callsign: violation.callsign, heldForMs: now - firstSeen
+          });
+          continue;
+        }
+        pending[key] = { firstSeen, confirmed: true };
+        confirmed.push(violation);
+        logger.warn('Roster absence confirmed against a fresh TMS pull', {
+          cid: violation.cid, callsign: violation.callsign, absentForMs: now - firstSeen
+        });
+      }
+    }
+  }
+
+  try {
+    await env.hours.put(ROSTER_PENDING_KV_KEY, JSON.stringify(pending));
+  } catch (e) {
+    logger.warn('Roster confirmation state write failed', { error: e?.message });
+  }
+
+  return confirmed;
+}
+
 async function checkAndAlertLiveViolations(env) {
-  const { ratingViolations, atisViolations, endorsementViolations, rosterViolations = [], skipped, reason } = await checkLiveVatsimData(env);
+  const { ratingViolations, atisViolations, endorsementViolations, rosterViolations = [],
+          rosterChecked = false, skipped, reason } = await checkLiveVatsimData(env);
 
   if (skipped) {
     logger.error('Live violation check could not run — upstream data unavailable', null, { reason });
     return { skipped: true, reason, ratingViolations: 0, atisViolations: 0, endorsementViolations: 0, newAlerts: 0, alerted: false };
   }
 
+  // Roster absences must survive the confirmation window before they can alert. Skipped
+  // outright when the absence check did not run this tick, so an unreliable TMS read
+  // cannot silently reset anyone's confirmation clock.
+  const confirmedRosterViolations = rosterChecked
+    ? await confirmRosterViolations(env, rosterViolations)
+    : [];
+
   if (ratingViolations.length === 0 && atisViolations.length === 0
-      && endorsementViolations.length === 0 && rosterViolations.length === 0) {
-    logger.info('No live violations detected');
+      && endorsementViolations.length === 0 && confirmedRosterViolations.length === 0) {
+    logger.info('No live violations to alert on', {
+      rosterAwaitingConfirmation: rosterViolations.length
+    });
     return { ratingViolations: 0, atisViolations: 0, endorsementViolations: 0, rosterViolations: 0, newAlerts: 0, alerted: false };
   }
 
@@ -1885,7 +2065,7 @@ async function checkAndAlertLiveViolations(env) {
     return !alerted[key] || (now - alerted[key] > LIVE_CHECK_ALERT_COOLDOWN_MS);
   });
 
-  const newRosterViolations = rosterViolations.filter(v => {
+  const newRosterViolations = confirmedRosterViolations.filter(v => {
     const key = `roster_${v.cid}_${v.callsign}`;
     return !alerted[key] || (now - alerted[key] > LIVE_CHECK_ALERT_COOLDOWN_MS);
   });
@@ -1912,7 +2092,8 @@ async function checkAndAlertLiveViolations(env) {
     ratingViolations: ratingViolations.length,
     atisViolations: atisViolations.length,
     endorsementViolations: endorsementViolations.length,
-    rosterViolations: rosterViolations.length,
+    rosterViolations: confirmedRosterViolations.length,
+    rosterAwaitingConfirmation: rosterViolations.length - confirmedRosterViolations.length,
     newAlerts: newRatingViolations.length + newAtisViolations.length
       + newEndorsementViolations.length + newRosterViolations.length,
     alerted: newRatingViolations.length > 0 || newAtisViolations.length > 0
