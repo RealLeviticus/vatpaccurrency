@@ -133,6 +133,8 @@ function hasValidEnrSoloEndorsement(endorsementsByCid, cid, callsign, now = Date
 
 // Cooldown per violation to avoid Discord spam (1 hour)
 const LIVE_CHECK_ALERT_COOLDOWN_MS = 60 * 60 * 1000;
+// Last alert-cooldown state this isolate wrote, kept in case the KV write failed
+let LIVE_ALERTED_MEMORY = {};
 
 // Controllers routinely connect before VATPAC's TMS roster catches up, so a single
 // absent reading proves nothing. Hold a roster absence for this long and re-verify it
@@ -449,6 +451,7 @@ async function handleAPI(request, env) {
     if (path === '/api/debug/tms' && method === 'GET') {
       const visitingCids = await getTMSList('visiting', env);
       const localCids = await getTMSList('local', env);
+      const vatnzCids = [...await getVatnzLoaCidSet(env)];
       return jsonResponse({
         visiting: {
           count: visitingCids.length,
@@ -457,6 +460,11 @@ async function handleAPI(request, env) {
         local: {
           count: localCids.length,
           sample: localCids.slice(0, 10)
+        },
+        vatnzLoa: {
+          count: vatnzCids.length,
+          savedAt: VATNZ_ROSTER_CACHE?.savedAt ? new Date(VATNZ_ROSTER_CACHE.savedAt).toISOString() : null,
+          sample: vatnzCids.slice(0, 10)
         }
       }, 200, env, request);
     }
@@ -790,6 +798,86 @@ async function getTMSEndorsementsByCid(env = null) {
     map.set(cid, Array.isArray(user.endorsements) ? user.endorsements : []);
   }
   return map;
+}
+
+// ==================== VATNZ Letter of Agreement Roster ====================
+
+// VATNZ controllers who hold VATPAC positions under the letter of agreement are not
+// in TMS `/users` — only on vatpac.org's own server-rendered roster. Until TMS exposes
+// them, read that page so they are not reported as "Not On Roster" every session.
+const VATNZ_ROSTER_URL = 'https://vatpac.org/controllers/roster?filter=nz';
+const VATNZ_ROSTER_KV_KEY = 'vatnz_loa_roster';
+const VATNZ_ROSTER_TTL_MS = 24 * 60 * 60 * 1000;
+// After a failed refresh, keep serving the last good list and retry after this long.
+const VATNZ_ROSTER_RETRY_MS = 60 * 60 * 1000;
+// The pager only links a window of pages, so walk until a page comes back empty.
+const VATNZ_ROSTER_MAX_PAGES = 15;
+
+let VATNZ_ROSTER_CACHE = null; // { cids: string[], savedAt, attemptedAt }
+
+// CIDs from one roster page. Each row's division cell is checked, so if the site ever
+// ignores `filter=nz` we read nothing rather than exempting the whole VATPAC roster.
+function parseVatnzRosterPage(html) {
+  const cids = [];
+  for (const row of String(html).split('<tr').slice(1)) {
+    const body = row.split('</tr>')[0];
+    const cid = body.match(/tabular-nums">\s*(\d{4,8})\s*</)?.[1];
+    if (cid && /New Zealand \(VATNZ\)/.test(body)) cids.push(cid);
+  }
+  return cids;
+}
+
+async function fetchVatnzRoster() {
+  const cids = new Set();
+  for (let page = 1; page <= VATNZ_ROSTER_MAX_PAGES; page++) {
+    const r = await fetch(`${VATNZ_ROSTER_URL}&page=${page}`, {
+      headers: { 'User-Agent': 'VATPAC-Audit-Worker' }
+    });
+    if (!r.ok) throw new Error(`VATNZ roster page ${page} returned HTTP ${r.status}`);
+    const pageCids = parseVatnzRosterPage(await r.text());
+    // Past the last page, or the site clamping out-of-range pages back to the last one.
+    if (pageCids.length === 0 || pageCids.every(c => cids.has(c))) break;
+    pageCids.forEach(c => cids.add(c));
+  }
+  if (cids.size === 0) throw new Error('VATNZ roster parsed to zero controllers — page layout may have changed');
+  return [...cids];
+}
+
+// Never throws: if the roster can't be read the exemption simply doesn't apply, which
+// means NZ controllers get flagged as before rather than anyone being missed.
+async function getVatnzLoaCidSet(env) {
+  const now = Date.now();
+  if (!VATNZ_ROSTER_CACHE && env?.hours) {
+    try {
+      VATNZ_ROSTER_CACHE = await env.hours.get(VATNZ_ROSTER_KV_KEY, { type: 'json' });
+    } catch (e) {
+      logger.warn('VATNZ roster KV read failed', { error: e?.message });
+    }
+  }
+
+  const cached = VATNZ_ROSTER_CACHE;
+  const fresh = cached?.savedAt && now - cached.savedAt < VATNZ_ROSTER_TTL_MS;
+  const retryDue = !cached?.attemptedAt || now - cached.attemptedAt >= VATNZ_ROSTER_RETRY_MS;
+  if (fresh || !retryDue) return new Set(cached?.cids || []);
+
+  try {
+    const cids = await fetchVatnzRoster();
+    VATNZ_ROSTER_CACHE = { cids, savedAt: now, attemptedAt: now };
+    logger.info('VATNZ LoA roster refreshed', { count: cids.length });
+  } catch (e) {
+    VATNZ_ROSTER_CACHE = { cids: cached?.cids || [], savedAt: cached?.savedAt || 0, attemptedAt: now };
+    logger.warn('VATNZ LoA roster refresh failed — using last good list', {
+      error: e?.message, cachedCount: cached?.cids?.length || 0
+    });
+  }
+  if (env?.hours) {
+    try {
+      await env.hours.put(VATNZ_ROSTER_KV_KEY, JSON.stringify(VATNZ_ROSTER_CACHE));
+    } catch (e) {
+      logger.warn('VATNZ roster KV write failed', { error: e?.message });
+    }
+  }
+  return new Set(VATNZ_ROSTER_CACHE.cids);
 }
 
 // VATPAC callsigns - auto-synced from vatSys datasets
@@ -1552,6 +1640,7 @@ async function checkLiveVatsimData(env) {
     // Get endorsement map for all TMS users (reuses same cache)
     const endorsementMap = await getTMSEndorsementMap(env);
     const endorsementsByCid = await getTMSEndorsementsByCid(env);
+    const vatnzLoaCids = await getVatnzLoaCidSet(env);
 
     const ratingViolations = [];
     const atisViolations = [];
@@ -1611,8 +1700,9 @@ async function checkLiveVatsimData(env) {
 
       // Not on the VATPAC roster at all. Deliberately not waived by an OTS:
       // if someone has been removed from the roster, a supervised session is
-      // not a reason to stay quiet about it.
-      if (rosterTrustworthy && !endorsementMap.has(cid)) {
+      // not a reason to stay quiet about it. VATNZ LoA controllers are absent
+      // from TMS by design, so they are checked against vatpac.org's NZ roster.
+      if (rosterTrustworthy && !endorsementMap.has(cid) && !vatnzLoaCids.has(cid)) {
         rosterViolations.push({
           cid,
           callsign,
@@ -1935,6 +2025,9 @@ async function confirmRosterViolations(env, violations) {
   } catch (e) {
     logger.warn('Roster confirmation state unreadable — starting fresh', { error: e?.message });
   }
+  // This runs every minute; writing back an unchanged object would cost 1,440 KV
+  // writes a day on its own, past the free plan's 1,000-write daily limit.
+  const pendingBefore = JSON.stringify(pending);
 
   const now = Date.now();
   const stillAbsent = new Set();
@@ -2008,10 +2101,13 @@ async function confirmRosterViolations(env, violations) {
     }
   }
 
-  try {
-    await env.hours.put(ROSTER_PENDING_KV_KEY, JSON.stringify(pending));
-  } catch (e) {
-    logger.warn('Roster confirmation state write failed', { error: e?.message });
+  const pendingAfter = JSON.stringify(pending);
+  if (pendingAfter !== pendingBefore) {
+    try {
+      await env.hours.put(ROSTER_PENDING_KV_KEY, pendingAfter);
+    } catch (e) {
+      logger.warn('Roster confirmation state write failed', { error: e?.message });
+    }
   }
 
   return confirmed;
@@ -2041,11 +2137,16 @@ async function checkAndAlertLiveViolations(env) {
     return { ratingViolations: 0, atisViolations: 0, endorsementViolations: 0, rosterViolations: 0, newAlerts: 0, alerted: false };
   }
 
-  // Load already-alerted violations from KV to avoid spamming
+  // Load already-alerted violations from KV to avoid spamming. The in-memory copy
+  // covers a KV write that failed (e.g. the daily write limit), which would otherwise
+  // re-send the same alert every minute while this isolate stays warm.
   let alerted = {};
   try {
     alerted = await env.hours.get('live_violations_alerted', { type: 'json' }) || {};
   } catch { /* start fresh */ }
+  for (const [key, ts] of Object.entries(LIVE_ALERTED_MEMORY)) {
+    if (!(alerted[key] >= ts)) alerted[key] = ts;
+  }
 
   const now = Date.now();
 
@@ -2085,7 +2186,12 @@ async function checkAndAlertLiveViolations(env) {
       if (now - ts > 24 * 60 * 60 * 1000) delete alerted[key];
     }
 
-    await env.hours.put('live_violations_alerted', JSON.stringify(alerted));
+    LIVE_ALERTED_MEMORY = alerted;
+    try {
+      await env.hours.put('live_violations_alerted', JSON.stringify(alerted));
+    } catch (e) {
+      logger.error('Alert cooldown state write failed — relying on in-memory copy', e);
+    }
   }
 
   return {
