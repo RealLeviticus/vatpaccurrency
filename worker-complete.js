@@ -145,10 +145,6 @@ const ROSTER_CONFIRMATION_DELAY_MS = 10 * 60 * 1000;
 // KV key holding first-seen timestamps for roster absences awaiting confirmation
 const ROSTER_PENDING_KV_KEY = 'roster_pending_confirmation';
 
-// KV key for controllers muted from under-hours audit alerts
-// (key name kept for backwards compatibility with stored data)
-const EXCLUSIONS_KV_KEY = 'live_check_exclusions';
-
 // Human-readable names for each TMS endorsement SKU.
 const ENDORSEMENT_LABELS = {
   dev: 'Development',
@@ -248,26 +244,6 @@ async function saveStore(env, data) {
     } catch (err) {
       logger.error('KV save failed', err);
     }
-  }
-}
-
-// Exclusions stored as { [cid]: { addedAt } }
-async function loadExclusions(env) {
-  if (!env.hours) return {};
-  try {
-    return await env.hours.get(EXCLUSIONS_KV_KEY, { type: 'json' }) || {};
-  } catch (e) {
-    logger.error('Exclusions KV read failed', e);
-    return {};
-  }
-}
-
-async function saveExclusions(env, exclusions) {
-  if (!env.hours) return;
-  try {
-    await env.hours.put(EXCLUSIONS_KV_KEY, JSON.stringify(exclusions));
-  } catch (e) {
-    logger.error('Exclusions KV save failed', e);
   }
 }
 
@@ -410,41 +386,6 @@ async function handleAPI(request, env) {
     if (path === '/api/live-check' && method === 'GET') {
       const result = await checkLiveVatsimData(env);
       return jsonResponse(result, 200, env, request);
-    }
-
-    // GET /api/exclusions - list CIDs muted from under-hours audit alerts
-    if (path === '/api/exclusions' && method === 'GET') {
-      const exclusions = await loadExclusions(env);
-      return jsonResponse({
-        exclusions: Object.entries(exclusions).map(([cid, meta]) => ({ cid, ...meta }))
-      }, 200, env, request);
-    }
-
-    // POST /api/exclusions - mute a CID's under-hours audit alerts
-    if (path === '/api/exclusions' && method === 'POST') {
-      const body = await request.json().catch(() => ({}));
-      const cid = String(body.cid || '').trim();
-      if (!/^\d{3,10}$/.test(cid)) {
-        return jsonResponse({ error: 'Invalid CID' }, 400, env, request);
-      }
-      const exclusions = await loadExclusions(env);
-      exclusions[cid] = { addedAt: new Date().toISOString() };
-      await saveExclusions(env, exclusions);
-      logger.info('CID muted from under-hours audit alerts', { cid });
-      return jsonResponse({ success: true, cid }, 200, env, request);
-    }
-
-    // DELETE /api/exclusions/:cid - unmute a CID's under-hours audit alerts
-    if (path.startsWith('/api/exclusions/') && method === 'DELETE') {
-      const cid = path.replace('/api/exclusions/', '').trim();
-      const exclusions = await loadExclusions(env);
-      if (!(cid in exclusions)) {
-        return jsonResponse({ error: 'CID not excluded' }, 404, env, request);
-      }
-      delete exclusions[cid];
-      await saveExclusions(env, exclusions);
-      logger.info('CID unmuted for under-hours audit alerts', { cid });
-      return jsonResponse({ success: true, cid }, 200, env, request);
     }
 
     // DEBUG: Check TMS data
@@ -1539,16 +1480,13 @@ async function sendDiscordAuditAlert(env, store) {
     return;
   }
 
-  // Muted controllers are skipped for under-hours pings only
-  const excludedCids = new Set(Object.keys(await loadExclusions(env)));
-  const visitingFlagged = (store.visiting || []).filter(
-    r => r.status === 'flagged' && !excludedCids.has(r.id.replace('audit_', ''))
-  );
+  // Visiting controllers below the hour requirement are shown on the audit
+  // page only — they no longer trigger a Discord ping.
   const localNonDivision = (store.local || []).filter(
     r => r.status === 'not-division-member'
   );
 
-  if (visitingFlagged.length === 0 && localNonDivision.length === 0) {
+  if (localNonDivision.length === 0) {
     logger.info('No flagged controllers — skipping Discord notification');
     return;
   }
@@ -1560,35 +1498,15 @@ async function sendDiscordAuditAlert(env, store) {
     fields: []
   };
 
-  if (visitingFlagged.length > 0) {
-    const lines = visitingFlagged.map(r => {
-      const hrs = r.hoursLogged ?? 0;
-      const lastDate = r.lastSessionVatsim
-        ? new Date(r.lastSessionVatsim).toISOString().split('T')[0]
-        : 'N/A';
-      const callsign = r.lastCallsign ? ` (${r.lastCallsign})` : '';
-      return `\u2022 **${r.id.replace('audit_', '')}** — ${hrs}h / ${VISITING_HOURS_REQUIRED}h | Last: ${lastDate}${callsign}`;
-    });
-    // Discord field value max is 1024 chars — chunk if needed
-    const chunk = lines.join('\n').slice(0, 1024);
-    embed.fields.push({
-      name: `Visiting Below Hours (${visitingFlagged.length})`,
-      value: chunk || 'None',
-      inline: false
-    });
-  }
-
-  if (localNonDivision.length > 0) {
-    const lines = localNonDivision.map(r => {
-      return `\u2022 **${r.id.replace('audit_', '')}** — Division: ${r.division || 'unknown'}`;
-    });
-    const chunk = lines.join('\n').slice(0, 1024);
-    embed.fields.push({
-      name: `Local — Not Division Member (${localNonDivision.length})`,
-      value: chunk || 'None',
-      inline: false
-    });
-  }
+  const lines = localNonDivision.map(r => {
+    return `\u2022 **${r.id.replace('audit_', '')}** — Division: ${r.division || 'unknown'}`;
+  });
+  const chunk = lines.join('\n').slice(0, 1024);
+  embed.fields.push({
+    name: `Local — Not Division Member (${localNonDivision.length})`,
+    value: chunk || 'None',
+    inline: false
+  });
 
   const body = {
     content: `<@&${DISCORD_ROLE_ID}> Daily audit completed with flagged controllers.`,
@@ -1606,7 +1524,6 @@ async function sendDiscordAuditAlert(env, store) {
       logger.error('Discord webhook failed', null, { status: resp.status, body: text });
     } else {
       logger.info('Discord notification sent', {
-        visitingFlagged: visitingFlagged.length,
         localNonDivision: localNonDivision.length
       });
     }

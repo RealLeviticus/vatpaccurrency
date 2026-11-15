@@ -6,24 +6,21 @@
 // Version queries keep module imports in lockstep with the audit.js?v=N
 // cache-bust in index.html — without them the browser can pair a fresh
 // audit.js with a stale cached api.js/utils.js.
-import api from './api.js?v=7';
+import api from './api.js?v=8';
 import {
   formatDate,
   formatDuration,
   createStatusBadge,
   createRatingBadge,
   showError,
-  showSuccess,
   showLoading,
   hideLoading,
   debounce,
   escapeHTML
-} from './utils.js?v=7';
+} from './utils.js?v=8';
 
 let visitingData = [];
 let localData = [];
-// CIDs muted from under-hours audit alerts
-let excludedCids = new Set();
 let currentTab = 'visiting';
 const ITEMS_PER_PAGE = 25;
 let currentPage = {
@@ -120,11 +117,7 @@ async function loadAudits() {
     showLoading('Loading audit results...');
 
     // Fetch directly from KV endpoint for faster, always up-to-date data
-    const [kvData, exclusionData] = await Promise.all([
-      api.getKVData().catch(() => null),
-      api.getExclusions().catch(() => null)
-    ]);
-    excludedCids = new Set((exclusionData?.exclusions || []).map(e => String(e.cid)));
+    const kvData = await api.getKVData().catch(() => null);
 
     if (kvData) {
       visitingData = (kvData.visiting || []).map(a => normalizeAuditRecord(a, 'visiting'));
@@ -153,7 +146,7 @@ async function loadAudits() {
       if (tbody) {
         tbody.innerHTML = `
           <tr>
-            <td colspan="6" style="text-align: center;">
+            <td colspan="5" style="text-align: center;">
               <div class="empty-state">
                 <div class="empty-state-icon">⚠️</div>
                 <p>${escapeHTML(`Failed to load data: ${error.message}`)}</p>
@@ -210,7 +203,7 @@ function renderAuditTable(type) {
   if (!allData || allData.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="6" style="text-align: center;">
+        <td colspan="5" style="text-align: center;">
           <div class="empty-state">
             <div class="empty-state-icon">📊</div>
             <p>No ${type} audit data available</p>
@@ -228,7 +221,7 @@ function renderAuditTable(type) {
   if (data.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="6" style="text-align: center;">
+        <td colspan="5" style="text-align: center;">
           <div class="empty-state">
             <div class="empty-state-icon">🔍</div>
             <p>No results found for current search/filter</p>
@@ -275,16 +268,6 @@ function renderAuditTable(type) {
     const rating = escapeHTML(audit.rating || 'N/A');
     const hoursLogged = Number(audit.hoursLogged) || 0;
     const lastControlled = audit.lastSession ? escapeHTML(formatDate(audit.lastSession)) : 'Never';
-    const isExcluded = excludedCids.has(rawCid);
-    // Only offer the toggle for rows with a real CID (worker validates format)
-    const toggleCell = /^\d{3,10}$/.test(rawCid)
-      ? `<button
-            class="exclude-toggle${isExcluded ? ' excluded' : ''}"
-            data-cid="${cid}"
-            aria-pressed="${isExcluded}"
-            title="${isExcluded ? 'Muted from under-hours alerts — click to re-enable (live checks still apply)' : 'Click to mute under-hours alerts (live checks still apply)'}"
-          >${isExcluded ? '🔕 Muted' : '🔔 Alerts On'}</button>`
-      : '';
 
     return `
       <tr class="audit-row-${status}">
@@ -293,7 +276,6 @@ function renderAuditTable(type) {
         <td>${createStatusBadge(status)}</td>
         <td>${escapeHTML(formatDuration(hoursLogged))}</td>
         <td>${lastControlled}</td>
-        <td>${toggleCell}</td>
       </tr>
     `;
   }).join('');
@@ -393,52 +375,6 @@ function setupPagination(type) {
       }
     });
   }
-}
-
-// ==================== Alert Exclusions ====================
-
-/**
- * Toggle a controller's mute for under-hours audit alerts
- * @param {string} cid - Controller CID
- * @param {HTMLButtonElement} button - The clicked toggle button
- */
-async function toggleExclusion(cid, button) {
-  const isExcluded = excludedCids.has(cid);
-  button.disabled = true;
-
-  try {
-    if (isExcluded) {
-      await api.removeExclusion(cid);
-      excludedCids.delete(cid);
-      showSuccess(`${cid} will receive under-hours alerts again`);
-    } else {
-      await api.addExclusion(cid);
-      excludedCids.add(cid);
-      showSuccess(`${cid} muted from under-hours alerts`);
-    }
-  } catch (error) {
-    console.error('Failed to update exclusion:', error);
-    showError(`Failed to update alert exclusion: ${error.message}`);
-  }
-
-  // Re-render both tables so the same CID stays in sync everywhere
-  renderAuditTable('visiting');
-  renderAuditTable('local');
-}
-
-/**
- * Setup exclusion toggle buttons via event delegation
- * @param {'visiting'|'local'} type - Audit type
- */
-function setupExclusionToggles(type) {
-  const tbody = document.getElementById(`${type}TableBody`);
-  if (!tbody) return;
-
-  tbody.addEventListener('click', (event) => {
-    const button = event.target.closest('.exclude-toggle');
-    if (!button || button.disabled) return;
-    toggleExclusion(button.dataset.cid, button);
-  });
 }
 
 // ==================== Search and Filter ====================
@@ -573,10 +509,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // Setup data-level sorting for both tabs
   setupDataSort('visiting');
   setupDataSort('local');
-
-  // Setup alert exclusion toggles for both tabs
-  setupExclusionToggles('visiting');
-  setupExclusionToggles('local');
 
   // Add manual refresh button functionality if it exists
   const refreshBtn = document.getElementById('refreshAudits');

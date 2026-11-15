@@ -131,39 +131,6 @@ class WatchlistAPI {
     });
   }
 
-  // ==================== Alert Exclusion Endpoints ====================
-
-  /**
-   * Get controllers muted from under-hours audit alerts
-   * @returns {Promise<{exclusions: Array<{cid: string, addedAt: string}>}>}
-   */
-  async getExclusions() {
-    return this.request('/exclusions');
-  }
-
-  /**
-   * Mute a controller's under-hours audit alerts
-   * @param {string|number} cid - Controller CID
-   * @returns {Promise<{success: boolean, cid: string}>}
-   */
-  async addExclusion(cid) {
-    return this.request('/exclusions', {
-      method: 'POST',
-      body: JSON.stringify({ cid: String(cid) })
-    });
-  }
-
-  /**
-   * Unmute a controller's under-hours audit alerts
-   * @param {string|number} cid - Controller CID
-   * @returns {Promise<{success: boolean, cid: string}>}
-   */
-  async removeExclusion(cid) {
-    return this.request(`/exclusions/${cid}`, {
-      method: 'DELETE'
-    });
-  }
-
   // ==================== Presence Endpoints ====================
 
   /**
