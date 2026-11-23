@@ -6,8 +6,8 @@
  *   - https://github.com/vatSys/australia-dataset (Sectors.xml + Positions.xml)
  *   - https://github.com/vatSys/pacific-dataset (Sectors.xml + Positions.xml)
  *
- * Last updated: 2026-11-07T12:41:42.596Z
- * Total callsigns: 279
+ * Last updated: 2026-11-23T17:42:01.272Z
+ * Total callsigns: 278
  *
  * To update, run: node scripts/sync-positions.js
  */
@@ -28,21 +28,21 @@ const AERODROME = [
   'CG_TWR', 'CIN_TWR', 'CN_TWR', 'CS_TWR', 'DN_TWR', 'ED_TWR', 'EN_TWR', 'ES_TWR',
   'GIG_TWR', 'HB_TWR', 'HM_TWR', 'JT-C_TWR', 'JT_TWR', 'KA_TWR', 'KWA_TWR', 'LM_TWR',
   'LT_TWR', 'MB-W_TWR', 'MB_TWR', 'MK_TWR', 'ML_TWR', 'NFFN_TWR', 'NFNA_TWR', 'NVVV_TWR',
-  'NWWL_TWR', 'NWWM_TWR', 'NWWW_TWR', 'NW_TWR', 'OK_TWR', 'PE_TWR', 'PF-W_TWR', 'PF_TWR',
-  'PH_TWR', 'PKWA_TWR', 'RI_TWR', 'RK_TWR', 'SG_TWR', 'SU_TWR', 'SY-E_TWR', 'SY_TWR',
-  'TL_TWR', 'TN_TWR', 'TW-S_TWR', 'TW_TWR', 'WLM_TWR', 'WR_TWR', 'WS_TWR'
+  'NWWM_TWR', 'NWWW_TWR', 'NW_TWR', 'OK_TWR', 'PE_TWR', 'PF-W_TWR', 'PF_TWR', 'PH_TWR',
+  'PKWA_TWR', 'RI_TWR', 'RK_TWR', 'SG_TWR', 'SU_TWR', 'SY-E_TWR', 'SY_TWR', 'TL_TWR',
+  'TN_TWR', 'TW-S_TWR', 'TW_TWR', 'WLM_TWR', 'WR_TWR', 'WS_TWR'
 ];
 
 // Approach/Departure positions (APP/DEP)
 const APPROACH = [
   'AD-R_APP', 'AD-W_APP', 'AD_APP', 'AMB_APP', 'AV_APP', 'AYNZ_APP', 'AYPY_APP', 'BA_APP',
-  'BK_APP', 'BN-C_APP', 'BN-F_APP', 'BN-R_APP', 'BN-S_APP', 'BN_APP', 'CB-W_APP', 'CB_APP',
-  'CIN_APP', 'CS-W_APP', 'CS_APP', 'DN-W_APP', 'DN_APP', 'ES_APP', 'HB_APP', 'LM_APP',
-  'LT_APP', 'MK_APP', 'ML-R_APP', 'ML_APP', 'NFFN_APP', 'NFNA_APP', 'NVVV_APP', 'NWWM_APP',
-  'NWWW_APP', 'NW_APP', 'OK_APP', 'PE_APP', 'PH-R_APP', 'PH_APP', 'RI_APP', 'RK_APP',
-  'SG_APP', 'SY-DE_APP', 'SY-D_APP', 'SY-N_APP', 'SY-R_APP', 'SY_APP', 'TL_APP', 'TN_APP',
-  'WLM-H_APP', 'WLM_APP', 'WS_APP', 'BN-S_DEP', 'BN_DEP', 'ML-S_DEP', 'ML_DEP', 'PH_DEP',
-  'SY-N_DEP', 'SY_DEP'
+  'BK_APP', 'BN-C_APP', 'BN-R_APP', 'BN-S_APP', 'BN_APP', 'CB-W_APP', 'CB_APP', 'CIN_APP',
+  'CS-W_APP', 'CS_APP', 'DN-W_APP', 'DN_APP', 'ES_APP', 'HB_APP', 'LM_APP', 'LT_APP',
+  'MK_APP', 'ML-R_APP', 'ML_APP', 'NFFN_APP', 'NFNA_APP', 'NVVV_APP', 'NWWM_APP', 'NWWW_APP',
+  'NW_APP', 'OK_APP', 'PE_APP', 'PH-R_APP', 'PH_APP', 'RI_APP', 'RK_APP', 'SG_APP',
+  'SY-DE_APP', 'SY-D_APP', 'SY-N_APP', 'SY-R_APP', 'SY_APP', 'TL_APP', 'TN_APP', 'WLM-H_APP',
+  'WLM_APP', 'WS_APP', 'BN-S_DEP', 'BN_DEP', 'ML-S_DEP', 'ML_DEP', 'PH_DEP', 'SY-N_DEP',
+  'SY_DEP'
 ];
 
 // Enroute positions (CTR/FSS)
@@ -56,7 +56,7 @@ const ENROUTE = [
   'ML-HYD_CTR', 'ML-JAR_CTR', 'ML-KAT_CTR', 'ML-LEA_CTR', 'ML-LEO_CTR', 'ML-MEK_CTR', 'ML-MTK_CTR', 'ML-MUN_CTR',
   'ML-MZI_CTR', 'ML-NEW_CTR', 'ML-OLW_CTR', 'ML-OXL_CTR', 'ML-PAR_CTR', 'ML-PIY_CTR', 'ML-POT_CTR', 'ML-SCR_CTR',
   'ML-SNO_CTR', 'ML-TBD_CTR', 'ML-WAR_CTR', 'ML-WOL_CTR', 'ML-WON_CTR', 'ML-WRA_CTR', 'ML-YWE_CTR', 'NFFJ_CTR',
-  'BN-COL_FSS', 'BN-FLD_FSS', 'BN-TSN_FSS', 'ML-IND_FSS', 'ML-INE_FSS', 'ML-INS_FSS', 'NFFF_FSS'
+  'AGGG_FSS', 'BN-COL_FSS', 'BN-FLD_FSS', 'BN-TSN_FSS', 'ML-IND_FSS', 'ML-INE_FSS', 'ML-INS_FSS', 'NFFF_FSS'
 ];
 
 // Flow positions (FMP)
